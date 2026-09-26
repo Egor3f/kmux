@@ -1810,7 +1810,14 @@ QList<ViewProperties *> ViewManager::viewProperties() const
 
 namespace
 {
-QJsonObject saveSessionTerminal(TerminalDisplay *terminalDisplay)
+// Layout files are templates that can be loaded any number of times, so only
+// workspace state keeps the identity behind SHELL_SESSION_ID.
+enum class SavedShellIdentity {
+    Include,
+    Omit,
+};
+
+QJsonObject saveSessionTerminal(TerminalDisplay *terminalDisplay, SavedShellIdentity shellIdentity)
 {
     QJsonObject thisTerminal;
     auto terminalSession = terminalDisplay->sessionController()->session();
@@ -1823,6 +1830,9 @@ QJsonObject saveSessionTerminal(TerminalDisplay *terminalDisplay)
     const Profile::Ptr profile = SessionManager::instance()->sessionProfile(terminalSession);
     const int sessionRestoreId = SessionManager::instance()->getRestoreId(terminalSession);
     thisTerminal.insert(QStringLiteral("SessionRestoreId"), sessionRestoreId);
+    if (shellIdentity == SavedShellIdentity::Include) {
+        thisTerminal.insert(QStringLiteral("SessionGuid"), terminalSession->shellSessionUuid().toString());
+    }
     thisTerminal.insert(QStringLiteral("Columns"), terminalDisplay->columns());
     thisTerminal.insert(QStringLiteral("Lines"), terminalDisplay->lines());
     thisTerminal.insert(QStringLiteral("WorkingDirectory"), terminalDisplay->session()->currentWorkingDirectory());
@@ -1852,7 +1862,7 @@ QJsonObject saveSessionTerminal(TerminalDisplay *terminalDisplay)
     return thisTerminal;
 }
 
-QJsonObject saveSessionsRecurse(QSplitter *splitter)
+QJsonObject saveSessionsRecurse(QSplitter *splitter, SavedShellIdentity shellIdentity)
 {
     QJsonObject thisSplitter;
     thisSplitter.insert(QStringLiteral("Orientation"), splitter->orientation() == Qt::Horizontal ? QStringLiteral("Horizontal") : QStringLiteral("Vertical"));
@@ -1864,12 +1874,12 @@ QJsonObject saveSessionsRecurse(QSplitter *splitter)
         auto *maybeTerminalDisplay = ViewSplitter::terminalDisplayForWidget(widget);
 
         if (maybeSplitter != nullptr) {
-            const QJsonObject savedSplitter = saveSessionsRecurse(maybeSplitter);
+            const QJsonObject savedSplitter = saveSessionsRecurse(maybeSplitter, shellIdentity);
             if (!savedSplitter.isEmpty()) {
                 internalWidgets.append(savedSplitter);
             }
         } else if (maybeTerminalDisplay != nullptr) {
-            const QJsonObject savedTerminal = saveSessionTerminal(maybeTerminalDisplay);
+            const QJsonObject savedTerminal = saveSessionTerminal(maybeTerminalDisplay, shellIdentity);
             if (!savedTerminal.isEmpty()) {
                 internalWidgets.append(savedTerminal);
             }
@@ -1889,7 +1899,7 @@ QJsonArray saveContainerSessions(TabbedViewContainer *container)
     for (int i = 0; container != nullptr && i < container->count(); i++) {
         auto *splitter = qobject_cast<QSplitter *>(container->widget(i));
         if (splitter != nullptr) {
-            const QJsonObject savedSplitter = saveSessionsRecurse(splitter);
+            const QJsonObject savedSplitter = saveSessionsRecurse(splitter, SavedShellIdentity::Include);
             if (!savedSplitter.isEmpty()) {
                 rootArray.append(savedSplitter);
             }
@@ -1966,7 +1976,7 @@ void ViewManager::saveLayout(QString fileName)
         KMessageBox::error(this->widget(), i18nc("@label:textbox", "A problem occurred when saving the Layout.\n%1", file.fileName()));
     }
 
-    QJsonObject jsonSplit = saveSessionsRecurse(activeContainer()->activeViewSplitter());
+    QJsonObject jsonSplit = saveSessionsRecurse(activeContainer()->activeViewSplitter(), SavedShellIdentity::Omit);
 
     if (!jsonSplit.isEmpty()) {
         file.write(QJsonDocument(jsonSplit).toJson());
@@ -2074,8 +2084,24 @@ Profile::Ptr savedSessionProfile(const QJsonObject &sessionObject)
     return restoredProfile;
 }
 
+// Another window can restore the same workspace while the first one still runs
+// those shells, and two live shells must not share one SHELL_SESSION_ID.
+bool isShellSessionUuidInUse(const QUuid &uuid, const Session *candidate)
+{
+    const QList<Session *> sessions = SessionManager::instance()->sessions();
+    return std::any_of(sessions.cbegin(), sessions.cend(), [&uuid, candidate](const Session *session) {
+        return session != candidate && session->shellSessionUuid() == uuid;
+    });
+}
+
 void restoreColdSessionState(Session *session, const QJsonObject &sessionObject)
 {
+    if (sessionObject.contains(QStringLiteral("SessionGuid"))) {
+        const QUuid shellSessionUuid(sessionObject[QStringLiteral("SessionGuid")].toString());
+        if (!isShellSessionUuidInUse(shellSessionUuid, session)) {
+            session->setShellSessionUuid(shellSessionUuid);
+        }
+    }
     if (sessionObject.contains(QStringLiteral("AutoClose"))) {
         session->setAutoClose(sessionObject[QStringLiteral("AutoClose")].toBool());
     }

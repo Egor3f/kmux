@@ -112,6 +112,8 @@ void ViewManagerTest::testSaveLayout()
 
     QFile layoutFile(m_testDir->filePath(QStringLiteral("test.json")));
     QVERIFY(layoutFile.exists());
+    QVERIFY(layoutFile.open(QIODevice::ReadOnly | QIODevice::Text));
+    QVERIFY(!layoutFile.readAll().contains("SessionGuid"));
 }
 
 void ViewManagerTest::testLoadLayout()
@@ -2355,6 +2357,50 @@ void ViewManagerTest::testColdRestoreIgnoresEmptyEncoding()
     Session *restoredSession = restoredManager->activeViewController()->session();
     QVERIFY(restoredSession != nullptr);
     QCOMPARE(restoredSession->codec(), profileEncoding);
+}
+
+void ViewManagerTest::testColdRestorePreservesShellSessionId()
+{
+    KConfig config(m_testDir->filePath(QStringLiteral("shell-session-id-testrc")), KConfig::SimpleConfig);
+    KConfigGroup group(&config, QStringLiteral("Window"));
+
+    QString savedShellSessionId;
+    QPointer<Session> sourceSession;
+    {
+        auto sourceWindow = MainWindow();
+        sourceSession = sourceWindow.createSession(ProfileManager::instance()->defaultProfile(), m_testDir->path());
+        QVERIFY(sourceSession != nullptr);
+        savedShellSessionId = sourceSession->shellSessionId();
+        sourceWindow.viewManager()->saveSessions(group);
+    }
+    QTRY_VERIFY(sourceSession.isNull());
+
+    auto restoredWindow = MainWindow();
+    restoredWindow.viewManager()->restoreSessions(group, false);
+
+    Session *restoredSession = restoredWindow.viewManager()->activeViewController()->session();
+    QVERIFY(restoredSession != nullptr);
+    QCOMPARE(restoredSession->shellSessionId(), savedShellSessionId);
+    QVERIFY(restoredSession->environment().contains(QStringLiteral("SHELL_SESSION_ID=%1").arg(savedShellSessionId)));
+}
+
+void ViewManagerTest::testColdRestoreDoesNotReuseLiveShellSessionId()
+{
+    KConfig config(m_testDir->filePath(QStringLiteral("live-shell-session-id-testrc")), KConfig::SimpleConfig);
+    KConfigGroup group(&config, QStringLiteral("Window"));
+
+    auto sourceWindow = MainWindow();
+    Session *sourceSession = sourceWindow.createSession(ProfileManager::instance()->defaultProfile(), m_testDir->path());
+    QVERIFY(sourceSession != nullptr);
+    sourceWindow.viewManager()->saveSessions(group);
+
+    auto restoredWindow = MainWindow();
+    restoredWindow.viewManager()->restoreSessions(group, false);
+
+    Session *restoredSession = restoredWindow.viewManager()->activeViewController()->session();
+    QVERIFY(restoredSession != nullptr);
+    QVERIFY(restoredSession != sourceSession);
+    QVERIFY(restoredSession->shellSessionId() != sourceSession->shellSessionId());
 }
 
 void ViewManagerTest::testFinishedAutoCloseCommandIsNotColdRestored()

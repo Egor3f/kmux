@@ -746,6 +746,15 @@ public Q_SLOTS:
      */
     Q_SCRIPTABLE QString shellSessionId() const;
 
+    /** Returns the QUuid behind SHELL_SESSION_ID. */
+    QUuid shellSessionUuid() const;
+
+    /** Reuses a saved identity so SHELL_SESSION_ID survives a restore and
+     * shells can keep per-session state such as command history.
+     * Has no effect once the session is running.
+     */
+    void setShellSessionUuid(const QUuid &uuid);
+
     /** Sets the session's tab title format for the specified @p context to @p format.
      *  This is an overloaded member function for setTabTitleFormat(TabTitleContext, QString)
      *  provided for convenience since enum data types may not be

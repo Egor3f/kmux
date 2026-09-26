@@ -74,6 +74,8 @@ private Q_SLOTS:
     void testRestoredProjectTitlesDoNotDuplicateDefaultTitle();
     void testColdRestorePreservesSessionProfileAndState();
     void testColdRestoreIgnoresEmptyEncoding();
+    void testColdRestorePreservesShellSessionId();
+    void testColdRestoreDoesNotReuseLiveShellSessionId();
     void testFinishedAutoCloseCommandIsNotColdRestored();
     void testFinishedHeldCommandIsNotColdRestored();
     void testColdRestoreRecoversIncompleteTerminalState();

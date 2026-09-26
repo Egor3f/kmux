@@ -487,6 +487,19 @@ QString Session::shellSessionId() const
     return friendlyUuid;
 }
 
+QUuid Session::shellSessionUuid() const
+{
+    return _uniqueIdentifier;
+}
+
+void Session::setShellSessionUuid(const QUuid &uuid)
+{
+    if (isRunning() || uuid.isNull()) {
+        return;
+    }
+    _uniqueIdentifier = uuid;
+}
+
 static QStringList postProcessArgs(const QStringList &contextArgs, const QStringList &args)
 {
 #ifndef Q_OS_WIN
