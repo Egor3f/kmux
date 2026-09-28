@@ -85,6 +85,34 @@ constexpr qsizetype RetiredClaudePromptIdLimit = 8;
 // Agents stop a Kmux hook helper after 5 seconds (see konsole-agent-hooks.cpp),
 // so every hook that was in flight when Escape was pressed arrives within it.
 constexpr int InterruptedTurnHookGracePeriodMs = 5000;
+// Claude reports no event when Escape interrupts a turn, and Escape may only
+// close a dialog, such as /usage. While a turn runs, Claude turns a spinner at
+// the start of the terminal title about once a second; an interrupt replaces it
+// with the idle glyph within a few dozen milliseconds.
+constexpr int ClaudeEscapeTitleTimeoutMs = 1500;
+
+enum class ClaudeTitleActivity {
+    Unknown,
+    Working,
+    Idle,
+};
+
+ClaudeTitleActivity claudeTitleActivity(const QString &title)
+{
+    if (title.isEmpty()) {
+        return ClaudeTitleActivity::Unknown;
+    }
+
+    // Claude 2.1.228 replaced the braille spinner with half-filled circles.
+    const char16_t glyph = title.at(0).unicode();
+    if (glyph == u'\u2733') {
+        return ClaudeTitleActivity::Idle;
+    }
+    if ((glyph >= u'\u25D0' && glyph <= u'\u25D3') || (glyph >= u'\u2800' && glyph <= u'\u28FF')) {
+        return ClaudeTitleActivity::Working;
+    }
+    return ClaudeTitleActivity::Unknown;
+}
 
 bool projectStatusProcessIsAlive(qlonglong processId)
 {
@@ -3094,6 +3122,7 @@ void ViewManager::handleSessionDestroyed(Session *session)
     // The session is already destroyed; use the pointer only as a key.
     _sessionsNeedingAttention.remove(session);
     _sessionProjectStatuses.remove(session);
+    _pendingClaudeEscapes.remove(session);
     updateAgentSleepInhibition();
     updateProjectStatusProcessTimer();
 }
@@ -3357,13 +3386,14 @@ void ViewManager::handleSessionAgentKey(Session *session, TabbedViewContainer *c
     // Codex runs its Interrupt hook when a turn is interrupted; Claude reports nothing.
     if (interruptsTurn && status->agent == QLatin1String("claude")
         && (status->status == ProjectWorkspaceContainer::ProjectStatus::NeedsInput || status->status == ProjectWorkspaceContainer::ProjectStatus::Running)) {
-        status->status = ProjectWorkspaceContainer::ProjectStatus::Idle;
-        status->pendingTerminalDecisions = 0;
-        status->pendingTerminalDecisionOrigin = PendingTerminalDecisionOrigin::None;
-        status->statusBeforePendingTerminalDecision = ProjectWorkspaceContainer::ProjectStatus::None;
-        status->turnInterrupted = true;
-        status->interruptedTurnHookDeadline.setRemainingTime(InterruptedTurnHookGracePeriodMs);
-        _sessionsNeedingAttention.remove(session);
+        // Claude does not animate its title under tmux, screen, or zellij.
+        // Without the spinner, assume that Escape interrupted the turn.
+        if (claudeTitleActivity(session->userTitle()) == ClaudeTitleActivity::Working) {
+            watchClaudeEscape(session);
+        } else {
+            interruptSessionTurn(session, QDeadlineTimer(InterruptedTurnHookGracePeriodMs));
+        }
+        return;
     } else if (confirmsDecision && status->pendingTerminalDecisions > 0 && status->status == ProjectWorkspaceContainer::ProjectStatus::NeedsInput) {
         --status->pendingTerminalDecisions;
         if (status->pendingTerminalDecisions == 0) {
@@ -3379,6 +3409,65 @@ void ViewManager::handleSessionAgentKey(Session *session, TabbedViewContainer *c
     }
     updateAgentSleepInhibition();
     refreshProjectSummary(container);
+}
+
+void ViewManager::watchClaudeEscape(Session *session)
+{
+    if (_pendingClaudeEscapes.contains(session)) {
+        return;
+    }
+
+    PendingClaudeEscape &pending = _pendingClaudeEscapes[session];
+    pending.serial = ++_claudeEscapeSerial;
+    pending.titleConnection = connect(session, &Session::sessionAttributeChanged, this, [this, session]() {
+        if (claudeTitleActivity(session->userTitle()) == ClaudeTitleActivity::Idle) {
+            resolveClaudeEscape(session);
+        }
+    });
+    QTimer::singleShot(ClaudeEscapeTitleTimeoutMs, this, [this, session, serial = pending.serial]() {
+        const auto watched = _pendingClaudeEscapes.constFind(session);
+        if (watched != _pendingClaudeEscapes.constEnd() && watched->serial == serial) {
+            resolveClaudeEscape(session);
+        }
+    });
+}
+
+void ViewManager::resolveClaudeEscape(Session *session)
+{
+    const auto pending = _pendingClaudeEscapes.constFind(session);
+    if (pending == _pendingClaudeEscapes.constEnd()) {
+        return;
+    }
+
+    disconnect(pending->titleConnection);
+    _pendingClaudeEscapes.erase(pending);
+    // A spinner that keeps turning means that Escape only closed a dialog.
+    if (claudeTitleActivity(session->userTitle()) == ClaudeTitleActivity::Idle) {
+        // Claude showed the interrupt itself, so no later hook continues that turn.
+        interruptSessionTurn(session, QDeadlineTimer(QDeadlineTimer::Forever));
+    }
+}
+
+void ViewManager::interruptSessionTurn(Session *session, QDeadlineTimer interruptedTurnHookDeadline)
+{
+    auto status = _sessionProjectStatuses.find(session);
+    if (status == _sessionProjectStatuses.end()
+        || (status->status != ProjectWorkspaceContainer::ProjectStatus::NeedsInput && status->status != ProjectWorkspaceContainer::ProjectStatus::Running)) {
+        return;
+    }
+
+    status->status = ProjectWorkspaceContainer::ProjectStatus::Idle;
+    status->pendingTerminalDecisions = 0;
+    status->pendingTerminalDecisionOrigin = PendingTerminalDecisionOrigin::None;
+    status->statusBeforePendingTerminalDecision = ProjectWorkspaceContainer::ProjectStatus::None;
+    status->turnInterrupted = true;
+    status->interruptedTurnHookDeadline = interruptedTurnHookDeadline;
+    _sessionsNeedingAttention.remove(session);
+    updateAgentSleepInhibition();
+    const auto containers = containersForSession(session);
+    for (TabbedViewContainer *container : containers) {
+        refreshProjectSummary(container);
+    }
 }
 
 void ViewManager::clearExitedSessionProjectStatuses()

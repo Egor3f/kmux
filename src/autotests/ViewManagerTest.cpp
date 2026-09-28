@@ -1041,6 +1041,62 @@ void ViewManagerTest::testProjectWorkspaceAgentInterruptClearsRunningStatus()
     QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
 }
 
+void ViewManagerTest::testProjectWorkspaceClaudeEscapeFollowsTitle()
+{
+    auto mw = MainWindow();
+    auto *viewManager = mw.viewManager();
+    auto *workspaces = viewManager->_workspaceContainer.data();
+    QVERIFY(workspaces != nullptr);
+
+    mw.newTab();
+    auto *project = viewManager->activeContainer();
+    QVERIFY(project != nullptr);
+    auto *terminal = project->activeViewSplitter()->activeTerminalDisplay();
+    QVERIFY(terminal != nullptr);
+    Session *session = terminal->sessionController()->session();
+    QVERIFY(session != nullptr);
+
+    const qlonglong processId = QCoreApplication::applicationPid();
+    const auto setTitle = [session](const QString &title) {
+        session->setSessionAttribute(Session::IconNameAndWindowTitle, title);
+    };
+    const auto startTurn = [session, processId]() {
+        session->setProjectStatusForAgentEvent(QStringLiteral("running"), processId, QStringLiteral("claude"), QStringLiteral("UserPromptSubmit"), {}, {}, {});
+    };
+
+    // Escape that interrupts the turn: the idle glyph replaces the spinner.
+    startTurn();
+    setTitle(QStringLiteral("\u25D0 Task"));
+    QTest::keyClick(terminal, Qt::Key_Escape);
+    QVERIFY(viewManager->_pendingClaudeEscapes.contains(session));
+    QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
+    setTitle(QStringLiteral("\u25D1 Task"));
+    QVERIFY(viewManager->_pendingClaudeEscapes.contains(session));
+    setTitle(QStringLiteral("\u2733 Task"));
+    QVERIFY(!viewManager->_pendingClaudeEscapes.contains(session));
+    QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
+    QVERIFY(viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
+    QVERIFY(viewManager->_sessionProjectStatuses.value(session).interruptedTurnHookDeadline.isForever());
+
+    // Escape that only closes a dialog: the spinner keeps turning.
+    startTurn();
+    QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
+    setTitle(QStringLiteral("\u25D0 Task"));
+    QTest::keyClick(terminal, Qt::Key_Escape);
+    setTitle(QStringLiteral("\u25D1 Task"));
+    QTRY_VERIFY_WITH_TIMEOUT(!viewManager->_pendingClaudeEscapes.contains(session), 5000);
+    QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
+    QVERIFY(!viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
+
+    // Claude keeps a static title under a terminal multiplexer, so Escape counts as an interrupt.
+    setTitle(QStringLiteral("\u2733 Task"));
+    QTest::keyClick(terminal, Qt::Key_Escape);
+    QVERIFY(!viewManager->_pendingClaudeEscapes.contains(session));
+    QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
+    QVERIFY(viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
+    QVERIFY(!viewManager->_sessionProjectStatuses.value(session).interruptedTurnHookDeadline.isForever());
+}
+
 void ViewManagerTest::testProjectWorkspaceCodexAutoReviewedPermissionStaysRunning()
 {
     auto mw = MainWindow();

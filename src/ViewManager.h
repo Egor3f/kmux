@@ -573,6 +573,9 @@ private:
                                  const QString &promptId = {},
                                  const QString &agentId = {});
     void handleSessionAgentKey(Session *session, TabbedViewContainer *container, QKeyEvent *keyEvent);
+    void watchClaudeEscape(Session *session);
+    void resolveClaudeEscape(Session *session);
+    void interruptSessionTurn(Session *session, QDeadlineTimer interruptedTurnHookDeadline);
     void clearExitedSessionProjectStatuses();
     void updateProjectStatusProcessTimer();
     void updateProjectInputRequirement();
@@ -617,6 +620,12 @@ private:
         QStringList retiredAgentPromptIds;
     };
     QHash<Session *, SessionProjectStatus> _sessionProjectStatuses;
+    struct PendingClaudeEscape {
+        quint64 serial = 0;
+        QMetaObject::Connection titleConnection;
+    };
+    QHash<Session *, PendingClaudeEscape> _pendingClaudeEscapes;
+    quint64 _claudeEscapeSerial = 0;
     struct DeferredProjectRestore {
         QJsonArray tabs;
         int activeTab = 0;
