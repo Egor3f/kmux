@@ -80,10 +80,11 @@ when its terminal closes. The helper leaves the command unchanged for
 `codex agents`, with `--remote`, or when `KMUX_CODEX_HOOKS_DISABLED=1` is set;
 Codex status may then appear on the wrong tab.
 
-Agents report no event when a turn is interrupted, so pressing Escape in a
-running agent's terminal shows it as idle right away. Escape also closes
-dialogs, such as Claude's `/usage`, without interrupting the turn; the running
-status then returns with the agent's next tool call made more than five
+Codex reports an interrupted turn with its `Interrupt` hook, and Kmux shows it
+as idle. Claude Code reports no event when a turn is interrupted, so pressing
+Escape in a running Claude terminal shows it as idle right away. Escape also
+closes dialogs, such as Claude's `/usage`, without interrupting the turn; the
+running status then returns with Claude's next tool call made more than five
 seconds after the key press.
 
 When Claude Code reports that a turn stopped because of a rate limit, Kmux

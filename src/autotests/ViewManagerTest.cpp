@@ -942,8 +942,11 @@ void ViewManagerTest::testProjectWorkspaceCodexDecisionKeysAreSessionScoped()
     QCOMPARE(viewManager->_sessionProjectStatuses.value(secondSession).status, ProjectWorkspaceContainer::ProjectStatus::NeedsInput);
     QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::NeedsInput);
 
+    // Codex reports a declined request with its Interrupt hook rather than through the key.
     QKeyEvent escapeKey(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
     Q_EMIT secondTerminal->keyPressedSignal(&escapeKey);
+    QCOMPARE(viewManager->_sessionProjectStatuses.value(secondSession).pendingTerminalDecisions, 1);
+    secondSession->setProjectStatusForAgentEvent(QStringLiteral("idle"), processId, QStringLiteral("codex"), QStringLiteral("Interrupt"), {}, {}, {});
     QCOMPARE(viewManager->_sessionProjectStatuses.value(secondSession).pendingTerminalDecisions, 0);
     QCOMPARE(viewManager->_sessionProjectStatuses.value(secondSession).status, ProjectWorkspaceContainer::ProjectStatus::Idle);
     QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::NeedsInput);
@@ -973,13 +976,27 @@ void ViewManagerTest::testProjectWorkspaceAgentInterruptClearsRunningStatus()
 
     const qlonglong processId = QCoreApplication::applicationPid();
     for (const QString &agent : {QStringLiteral("codex"), QStringLiteral("claude")}) {
+        const bool isCodex = agent == QLatin1String("codex");
+        // Codex reports an interrupt with its Interrupt hook. Claude reports none, so Escape stands for one.
+        const auto interruptTurn = [&]() {
+            if (isCodex) {
+                session->setProjectStatusForAgentEvent(QStringLiteral("idle"), processId, agent, QStringLiteral("Interrupt"), {}, {}, {});
+            } else {
+                QTest::keyClick(terminal, Qt::Key_Escape);
+            }
+        };
+
         session->setProjectStatusForAgentEvent(QStringLiteral("running"), processId, agent, QStringLiteral("UserPromptSubmit"), {}, {}, {});
         QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
 
         QTest::keyClick(terminal, Qt::Key_Escape, Qt::ShiftModifier);
         QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
+        if (isCodex) {
+            QTest::keyClick(terminal, Qt::Key_Escape);
+            QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
+        }
 
-        QTest::keyClick(terminal, Qt::Key_Escape);
+        interruptTurn();
         QCOMPARE(viewManager->_sessionProjectStatuses.value(session).status, ProjectWorkspaceContainer::ProjectStatus::Idle);
         QVERIFY(viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
         QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
@@ -993,16 +1010,23 @@ void ViewManagerTest::testProjectWorkspaceAgentInterruptClearsRunningStatus()
         QVERIFY(!viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
         QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
 
-        // Escape that only closed a dialog: the turn keeps emitting hooks after the in-flight ones.
-        QTest::keyClick(terminal, Qt::Key_Escape);
+        interruptTurn();
         QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
+        if (isCodex) {
+            // Codex reported the interrupt, so no later hook resumes the interrupted turn.
+            QVERIFY(viewManager->_sessionProjectStatuses.value(session).interruptedTurnHookDeadline.isForever());
+            session->setProjectStatusForAgentEvent(QStringLiteral("running"), processId, agent, QStringLiteral("PreToolUse"), {}, {}, {});
+            QVERIFY(viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
+            QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
+            continue;
+        }
+
+        // Escape that only closed a dialog: the turn keeps emitting hooks after the in-flight ones.
         viewManager->_sessionProjectStatuses[session].interruptedTurnHookDeadline.setRemainingTime(0);
         session->setProjectStatusForAgentEvent(QStringLiteral("idle"), processId, agent, QStringLiteral("IdlePrompt"), {}, {}, {});
         session->setProjectStatusForAgentEvent(QStringLiteral("needsInput"), processId, agent, QStringLiteral("Notification"), {}, {}, {});
-        if (agent == QLatin1String("claude")) {
-            const QString subagentId = QStringLiteral("subagent");
-            session->setProjectStatusForAgentEvent(QStringLiteral("running"), processId, agent, QStringLiteral("PreToolUse"), {}, {}, subagentId);
-        }
+        const QString subagentId = QStringLiteral("subagent");
+        session->setProjectStatusForAgentEvent(QStringLiteral("running"), processId, agent, QStringLiteral("PreToolUse"), {}, {}, subagentId);
         QVERIFY(viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
         QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
 

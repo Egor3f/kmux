@@ -52,7 +52,9 @@ struct HookEvent {
 // project-status helper resolves PermissionRequest dynamically because Codex
 // runs the hook before either the user or automatic approval reviewer.
 // Manual compaction is a standalone turn; automatic compaction inherits the
-// running state of the turn that triggered it.
+// running state of the turn that triggered it. Codex runs Interrupt instead of
+// Stop when a turn is interrupted, and clamps that hook's timeout to three
+// seconds, which must also be the configured value for its trust hash to match.
 const QList<HookEvent> CodexHookEvents = {
     {QStringLiteral("SessionStart"), QStringLiteral("session_start"), QStringLiteral("idle"), 5, QString()},
     {QStringLiteral("UserPromptSubmit"), QStringLiteral("user_prompt_submit"), QStringLiteral("running"), 5, QString()},
@@ -62,6 +64,7 @@ const QList<HookEvent> CodexHookEvents = {
     {QStringLiteral("PostCompact"), QStringLiteral("post_compact"), QStringLiteral("idle"), 5, QStringLiteral("manual")},
     {QStringLiteral("PermissionRequest"), QStringLiteral("permission_request"), QStringLiteral("needsInput"), 5, QString()},
     {QStringLiteral("Stop"), QStringLiteral("stop"), QStringLiteral("idle"), 5, QString()},
+    {QStringLiteral("Interrupt"), QStringLiteral("interrupt"), QStringLiteral("idle"), 3, QString()},
 };
 
 // Claude auto mode answers permission questions with its own classifier.

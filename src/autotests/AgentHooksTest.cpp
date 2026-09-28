@@ -350,6 +350,7 @@ void AgentHooksTest::testCodexTrustHashesMatchCurrentIdentity()
         {QStringLiteral("PostCompact"), QStringLiteral("post_compact")},
         {QStringLiteral("PermissionRequest"), QStringLiteral("permission_request")},
         {QStringLiteral("Stop"), QStringLiteral("stop")},
+        {QStringLiteral("Interrupt"), QStringLiteral("interrupt")},
     };
     const QString keySource = QFileInfo(hooksPath).canonicalFilePath();
     int checkedHashes = 0;
@@ -383,7 +384,7 @@ void AgentHooksTest::testCodexTrustHashesMatchCurrentIdentity()
             }
         }
     }
-    QCOMPARE(checkedHashes, 8);
+    QCOMPARE(checkedHashes, 9);
 }
 
 void AgentHooksTest::testClaudeCommandUsesTransparentLauncher()
@@ -1154,7 +1155,7 @@ void AgentHooksTest::testHomeScopedScripts_data()
     QTest::addColumn<QString>("settingsFile");
     QTest::addColumn<int>("handlerCount");
 
-    QTest::newRow("codex") << QStringLiteral("codex") << QStringLiteral("--codex-home") << QStringLiteral("hooks.json") << 8;
+    QTest::newRow("codex") << QStringLiteral("codex") << QStringLiteral("--codex-home") << QStringLiteral("hooks.json") << 9;
     QTest::newRow("claude") << QStringLiteral("claude") << QStringLiteral("--claude-home") << QStringLiteral("settings.json") << 14;
 }
 

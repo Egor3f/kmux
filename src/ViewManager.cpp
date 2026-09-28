@@ -3172,6 +3172,7 @@ void ViewManager::setSessionProjectStatus(Session *session,
     const bool beginsNotifiedTurn =
         isOtherClaudePrompt && !isOtherClaudeSession && !isClaudeSubagentEvent && !previousRetiredPromptIds.contains(normalizedPromptId);
     const bool beginsTurn = isSessionStart || isUserPromptSubmit || isPreCompact || beginsNotifiedTurn;
+    const bool isInterrupt = event.compare(QLatin1String("Interrupt"), Qt::CaseInsensitive) == 0;
 
     // Escape also closes agent dialogs, such as Claude's /usage, without
     // interrupting the turn. A main-agent hook that arrives after the in-flight
@@ -3182,8 +3183,8 @@ void ViewManager::setSessionProjectStatus(Session *session,
     const bool continuesInterruptedTurn =
         previousStatus.turnInterrupted && previousStatus.interruptedTurnHookDeadline.hasExpired() && !isClaudeSubagentEvent && !isAgentNotification;
 
-    // Codex does not emit Stop when a turn is interrupted. Ignore lifecycle
-    // hooks from that turn until an event explicitly begins new work.
+    // An interrupted turn does not emit Stop, and hooks from its in-flight work
+    // can still arrive. Ignore them until an event explicitly begins new work.
     if (previousStatus.turnInterrupted && !agentChanged && normalizedAgent == previousStatus.agent && isSupportedAgent && !beginsTurn
         && !continuesInterruptedTurn && projectStatusFromString(status) != ProjectWorkspaceContainer::ProjectStatus::None) {
         qCDebug(KonsoleDebug) << "Ignoring agent hook from an interrupted turn:" << normalizedAgent << event;
@@ -3264,7 +3265,7 @@ void ViewManager::setSessionProjectStatus(Session *session,
     const bool stopsTurn = event.compare(QLatin1String("Stop"), Qt::CaseInsensitive) == 0
         || event.compare(QLatin1String("StopFailure"), Qt::CaseInsensitive) == 0 || event.compare(QLatin1String("RateLimit"), Qt::CaseInsensitive) == 0;
     const bool endsAgentSession = event.compare(QLatin1String("SessionEnd"), Qt::CaseInsensitive) == 0;
-    const bool resetsPendingDecisions = startsTurn || stopsTurn;
+    const bool resetsPendingDecisions = startsTurn || stopsTurn || isInterrupt;
 
     bool claudeBackgroundWork = agentProcessChanged || startsTurn || endsAgentSession ? false : previousStatus.claudeBackgroundWork;
     if (isClaudeEvent && stopsTurn) {
@@ -3321,8 +3322,9 @@ void ViewManager::setSessionProjectStatus(Session *session,
     nextStatus.agent = normalizedAgent;
     nextStatus.claudeBackgroundWork = claudeBackgroundWork;
     nextStatus.agentProcessWasForeground = agentProcessWasForeground;
-    nextStatus.turnInterrupted = previousStatus.turnInterrupted && !agentProcessChanged && !beginsTurn && !continuesInterruptedTurn;
-    nextStatus.interruptedTurnHookDeadline = previousStatus.interruptedTurnHookDeadline;
+    nextStatus.turnInterrupted = isInterrupt || (previousStatus.turnInterrupted && !agentProcessChanged && !beginsTurn && !continuesInterruptedTurn);
+    // The agent reported the interrupt itself, so no later hook continues that turn.
+    nextStatus.interruptedTurnHookDeadline = isInterrupt ? QDeadlineTimer(QDeadlineTimer::Forever) : previousStatus.interruptedTurnHookDeadline;
     nextStatus.agentSessionId = agentSessionId;
     nextStatus.agentPromptId = agentPromptId;
     nextStatus.retiredAgentPromptIds = retiredAgentPromptIds;
@@ -3352,8 +3354,8 @@ void ViewManager::handleSessionAgentKey(Session *session, TabbedViewContainer *c
         return;
     }
 
-    const bool isSupportedAgent = status->agent == QLatin1String("codex") || status->agent == QLatin1String("claude");
-    if (interruptsTurn && isSupportedAgent
+    // Codex runs its Interrupt hook when a turn is interrupted; Claude reports nothing.
+    if (interruptsTurn && status->agent == QLatin1String("claude")
         && (status->status == ProjectWorkspaceContainer::ProjectStatus::NeedsInput || status->status == ProjectWorkspaceContainer::ProjectStatus::Running)) {
         status->status = ProjectWorkspaceContainer::ProjectStatus::Idle;
         status->pendingTerminalDecisions = 0;
