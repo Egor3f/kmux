@@ -2284,9 +2284,11 @@ void ViewManagerTest::testColdRestorePreservesSessionProfileAndState()
         QVERIFY(terminal[QStringLiteral("TabActivityColorSetByUser")].toBool());
     }
 
+    const int profileCountBeforeRestore = ProfileManager::instance()->allProfiles().count();
     auto restoredWindow = MainWindow();
     auto *restoredManager = restoredWindow.viewManager();
     restoredManager->restoreSessions(group, false);
+    QCOMPARE(ProfileManager::instance()->allProfiles().count(), profileCountBeforeRestore);
 
     Session *restoredSession = restoredManager->activeViewController()->session();
     QVERIFY(restoredSession != nullptr);
@@ -2297,6 +2299,7 @@ void ViewManagerTest::testColdRestorePreservesSessionProfileAndState()
     QCOMPARE(restoredSession->program(), program);
     QCOMPARE(restoredSession->arguments(), arguments);
     QCOMPARE(restoredProfile->environment(), environment);
+    QVERIFY(restoredSession->environment().contains(QStringLiteral("KMUX_RESTORE_TEST=preserved")));
     QVERIFY(!restoredSession->autoClose());
     QCOMPARE(restoredSession->tabTitleFormat(Session::LocalTabTitle), localTabTitle);
     QCOMPARE(restoredSession->tabTitleFormat(Session::RemoteTabTitle), remoteTabTitle);
