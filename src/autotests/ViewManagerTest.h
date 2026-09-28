@@ -73,6 +73,7 @@ private Q_SLOTS:
     void testSaveSessionsPreservesDeferredProjectWorkspaces();
     void testRestoredProjectTitlesDoNotDuplicateDefaultTitle();
     void testColdRestorePreservesSessionProfileAndState();
+    void testColdRestoreAppliesLaunchSettingsToSharedProfile();
     void testColdRestoreIgnoresEmptyEncoding();
     void testColdRestorePreservesShellSessionId();
     void testColdRestoreDoesNotReuseLiveShellSessionId();

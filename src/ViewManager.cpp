@@ -2081,6 +2081,8 @@ void restoreSessionLaunchSettings(Session *session, const QJsonObject &sessionOb
         return;
     }
 
+    // The session already holds the profile environment followed by entries
+    // that Kmux adds itself. Replace only the profile part.
     const Profile::Ptr profile = SessionManager::instance()->sessionProfile(session);
     QStringList environment = session->environment();
     for (const QString &profileEntry : profile->environment()) {

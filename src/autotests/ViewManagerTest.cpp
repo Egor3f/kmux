@@ -2341,6 +2341,76 @@ void ViewManagerTest::testColdRestorePreservesSessionProfileAndState()
     QCOMPARE(restoredSession->activityColor(), tabActivityColor);
 }
 
+void ViewManagerTest::testColdRestoreAppliesLaunchSettingsToSharedProfile()
+{
+    KConfig config(m_testDir->filePath(QStringLiteral("cold-restore-launch-settings-testrc")), KConfig::SimpleConfig);
+    KConfigGroup group(&config, QStringLiteral("Window"));
+
+    Profile::Ptr profile(new Profile(ProfileManager::instance()->defaultProfile()));
+    profile->setHidden(true);
+    profile->setProperty(Profile::Name, QStringLiteral("Cold restore shared profile"));
+    profile->setProperty(Profile::Path, m_testDir->filePath(QStringLiteral("cold-restore-shared.profile")));
+    profile->setProperty(Profile::Command, QStringLiteral("/bin/sh"));
+    profile->setProperty(Profile::Arguments, QStringList{QStringLiteral("/bin/sh")});
+    profile->setProperty(Profile::Environment, QStringList{QStringLiteral("TERM=xterm-256color"), QStringLiteral("KMUX_PROFILE_ONLY=1")});
+    ProfileManager::instance()->addProfile(profile);
+
+    // The saved launch settings differ from the profile, so the restored
+    // terminals can only get them from the saved state.
+    const QString program = QStringLiteral("/usr/bin/env");
+    const QStringList arguments = {program, QStringLiteral("sleep"), QStringLiteral("60")};
+    const QStringList environment = {QStringLiteral("TERM=xterm-256color"), QStringLiteral("KMUX_SAVED_ONLY=1")};
+    constexpr int terminalCount = 3;
+    QJsonArray tabs;
+    for (int i = 0; i < terminalCount; ++i) {
+        const QJsonObject terminal{{QStringLiteral("ProfilePath"), profile->path()},
+                                   {QStringLiteral("ProfileName"), profile->name()},
+                                   {QStringLiteral("Command"), program},
+                                   {QStringLiteral("Arguments"), QJsonArray::fromStringList(arguments)},
+                                   {QStringLiteral("Environment"), QJsonArray::fromStringList(environment)},
+                                   {QStringLiteral("AutoClose"), false}};
+        tabs.append(QJsonObject{{QStringLiteral("Orientation"), QStringLiteral("Horizontal")}, {QStringLiteral("Widgets"), QJsonArray{terminal}}});
+    }
+    const QJsonObject project{{QStringLiteral("Title"), QStringLiteral("Launch settings")}, {QStringLiteral("Tabs"), tabs}};
+    group.writeEntry("Projects", QJsonDocument(QJsonArray{project}).toJson(QJsonDocument::Compact));
+    group.writeEntry("ActiveProject", 0);
+
+    const int profileCountBeforeRestore = ProfileManager::instance()->allProfiles().count();
+    auto window = MainWindow();
+    auto *manager = window.viewManager();
+    manager->restoreSessions(group, false);
+    QCOMPARE(ProfileManager::instance()->allProfiles().count(), profileCountBeforeRestore);
+
+    auto *container = manager->_workspaceContainer->containers().constFirst();
+    QCOMPARE(container->count(), terminalCount);
+    QList<Session *> sessions;
+    for (int i = 0; i < container->count(); ++i) {
+        const auto terminals = container->viewSplitterAt(i)->findChildren<TerminalDisplay *>();
+        QCOMPARE(terminals.count(), 1);
+        Session *session = terminals.constFirst()->sessionController()->session();
+        QVERIFY(session != nullptr);
+        sessions.append(session);
+    }
+
+    for (Session *session : std::as_const(sessions)) {
+        QVERIFY(SessionManager::instance()->sessionProfile(session) == profile);
+        QCOMPARE(session->program(), program);
+        QCOMPARE(session->arguments(), arguments);
+        const QStringList sessionEnvironment = session->environment();
+        QVERIFY(sessionEnvironment.contains(QStringLiteral("KMUX_SAVED_ONLY=1")));
+        QVERIFY(!sessionEnvironment.contains(QStringLiteral("KMUX_PROFILE_ONLY=1")));
+        QCOMPARE(sessionEnvironment.count(QStringLiteral("TERM=xterm-256color")), 1);
+        QCOMPARE(sessionEnvironment.filter(QStringLiteral("KMUX_DBUS_WINDOW=")).count(), 1);
+        QTRY_VERIFY(session->isRunning());
+    }
+
+    // Restored terminals follow later edits of the profile they share.
+    ProfileManager::instance()->changeProfile(profile, {{Profile::Icon, QStringLiteral("cold-restore-icon")}}, false);
+    for (Session *session : std::as_const(sessions)) {
+        QCOMPARE(session->iconName(), QStringLiteral("cold-restore-icon"));
+    }
+}
+
 void ViewManagerTest::testColdRestoreIgnoresEmptyEncoding()
 {
     KConfig config(m_testDir->filePath(QStringLiteral("cold-restore-empty-encoding-testrc")), KConfig::SimpleConfig);
