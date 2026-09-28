@@ -2066,27 +2066,27 @@ Profile::Ptr savedSessionProfile(const QJsonObject &sessionObject)
     if (!profile) {
         profile = ProfileManager::instance()->defaultProfile();
     }
+    return profile;
+}
 
-    const bool hasRuntimeSettings = sessionObject.contains(QStringLiteral("Command")) || sessionObject.contains(QStringLiteral("Arguments"))
-        || sessionObject.contains(QStringLiteral("Environment"));
-    if (!hasRuntimeSettings) {
-        return profile;
-    }
-
-    Profile::Ptr restoredProfile(new Profile(profile));
-    restoredProfile->setHidden(true);
-    restoredProfile->setProperty(Profile::Name, profileName.isEmpty() ? profile->name() : profileName);
-    restoredProfile->setProperty(Profile::Path, profilePath.isEmpty() ? profile->path() : profilePath);
+void restoreSessionLaunchSettings(Session *session, const QJsonObject &sessionObject)
+{
     if (sessionObject.contains(QStringLiteral("Command"))) {
-        restoredProfile->setProperty(Profile::Command, sessionObject[QStringLiteral("Command")].toString());
+        session->setProgram(sessionObject[QStringLiteral("Command")].toString());
     }
     if (sessionObject.contains(QStringLiteral("Arguments"))) {
-        restoredProfile->setProperty(Profile::Arguments, jsonStringList(sessionObject[QStringLiteral("Arguments")]));
+        session->setArguments(jsonStringList(sessionObject[QStringLiteral("Arguments")]));
     }
-    if (sessionObject.contains(QStringLiteral("Environment"))) {
-        restoredProfile->setProperty(Profile::Environment, jsonStringList(sessionObject[QStringLiteral("Environment")]));
+    if (!sessionObject.contains(QStringLiteral("Environment"))) {
+        return;
     }
-    return restoredProfile;
+
+    const Profile::Ptr profile = SessionManager::instance()->sessionProfile(session);
+    QStringList environment = session->environment();
+    for (const QString &profileEntry : profile->environment()) {
+        environment.removeOne(profileEntry);
+    }
+    session->setEnvironment(jsonStringList(sessionObject[QStringLiteral("Environment")]) + environment);
 }
 
 // Another window can restore the same workspace while the first one still runs
@@ -2101,6 +2101,7 @@ bool isShellSessionUuidInUse(const QUuid &uuid, const Session *candidate)
 
 void restoreColdSessionState(Session *session, const QJsonObject &sessionObject)
 {
+    restoreSessionLaunchSettings(session, sessionObject);
     if (sessionObject.contains(QStringLiteral("SessionGuid"))) {
         const QUuid shellSessionUuid(sessionObject[QStringLiteral("SessionGuid")].toString());
         if (!isShellSessionUuidInUse(shellSessionUuid, session)) {
