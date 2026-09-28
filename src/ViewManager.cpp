@@ -133,6 +133,8 @@ bool isClaudeSubagentResolutionEvent(const QString &event)
         || event.compare(QLatin1String("StopFailure"), Qt::CaseInsensitive) == 0;
 }
 
+// A rate limit needs no answer and can last for hours, so it must not hide an agent that is still
+// running; it shows again once nothing more urgent remains.
 ProjectWorkspaceContainer::ProjectStatus higherPriorityProjectStatus(ProjectWorkspaceContainer::ProjectStatus current,
                                                                      ProjectWorkspaceContainer::ProjectStatus candidate)
 {
@@ -140,9 +142,9 @@ ProjectWorkspaceContainer::ProjectStatus higherPriorityProjectStatus(ProjectWork
         switch (status) {
         case ProjectWorkspaceContainer::ProjectStatus::NeedsInput:
             return 4;
-        case ProjectWorkspaceContainer::ProjectStatus::RateLimited:
-            return 3;
         case ProjectWorkspaceContainer::ProjectStatus::Running:
+            return 3;
+        case ProjectWorkspaceContainer::ProjectStatus::RateLimited:
             return 2;
         case ProjectWorkspaceContainer::ProjectStatus::Idle:
             return 1;
@@ -180,9 +182,9 @@ TerminalTabStatus higherPriorityTerminalTabStatus(TerminalTabStatus current, Ter
         switch (status) {
         case TerminalTabStatus::NeedsInput:
             return 5;
-        case TerminalTabStatus::RateLimited:
-            return 4;
         case TerminalTabStatus::AgentRunning:
+            return 4;
+        case TerminalTabStatus::RateLimited:
             return 3;
         case TerminalTabStatus::AgentIdle:
             return 2;

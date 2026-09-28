@@ -636,9 +636,13 @@ void ViewManagerTest::testTerminalTabsTrackSessionStatusesIndependently()
     QCOMPARE(project->terminalTabStatus(firstTabIndex), TerminalTabStatus::AgentIdle);
     firstSession->setProjectStatus(QStringLiteral("rateLimited"));
     QCOMPARE(project->terminalTabStatus(firstTabIndex), TerminalTabStatus::RateLimited);
-    splitSession->setProjectStatus(QStringLiteral("running"));
-    QCOMPARE(project->terminalTabStatus(firstTabIndex), TerminalTabStatus::RateLimited);
     QCOMPARE(project->terminalTabStatus(secondTabIndex), TerminalTabStatus::AgentRunning);
+    QCOMPARE(viewManager->_workspaceContainer->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
+    splitSession->setProjectStatus(QStringLiteral("running"));
+    QCOMPARE(project->terminalTabStatus(firstTabIndex), TerminalTabStatus::AgentRunning);
+    splitSession->setProjectStatus(QStringLiteral("idle"));
+    secondSession->setProjectStatus(QStringLiteral("idle"));
+    QCOMPARE(project->terminalTabStatus(firstTabIndex), TerminalTabStatus::RateLimited);
     QCOMPARE(viewManager->_workspaceContainer->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::RateLimited);
     QVERIFY(!viewManager->hasProjectNeedingInput());
     firstSession->setProjectStatus(QStringLiteral("needsInput"));

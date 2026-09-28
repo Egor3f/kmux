@@ -82,7 +82,9 @@ Codex status may then appear on the wrong tab.
 
 When Claude Code reports that a turn stopped because of a rate limit, Kmux
 shows an amber clock in the terminal tab and project rail. The exclamation
-mark remains reserved for requests for input or permission. An idle reminder
+mark remains reserved for requests for input or permission. When another
+agent in the same tab or project is still running, the running indicator
+takes precedence, and the clock returns once that work stops. An idle reminder
 does not clear the rate-limit status; it clears when work resumes or the
 agent session ends. Kmux does not yet distinguish Claude's "Wrapping up"
 phase or show the limit reset time.
