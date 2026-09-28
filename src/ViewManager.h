@@ -10,6 +10,7 @@
 // Qt
 #include <QAction>
 #include <QColor>
+#include <QDeadlineTimer>
 #include <QHash>
 #include <QJsonArray>
 #include <QObject>
@@ -610,6 +611,7 @@ private:
         bool claudeBackgroundWork = false;
         bool agentProcessWasForeground = false;
         bool turnInterrupted = false;
+        QDeadlineTimer interruptedTurnHookDeadline;
         QString agentSessionId;
         QString agentPromptId;
         QStringList retiredAgentPromptIds;

@@ -82,6 +82,9 @@ namespace
 {
 constexpr int ProjectStatusProcessCheckIntervalMs = 2000;
 constexpr qsizetype RetiredClaudePromptIdLimit = 8;
+// Agents stop a Kmux hook helper after 5 seconds (see konsole-agent-hooks.cpp),
+// so every hook that was in flight when Escape was pressed arrives within it.
+constexpr int InterruptedTurnHookGracePeriodMs = 5000;
 
 bool projectStatusProcessIsAlive(qlonglong processId)
 {
@@ -3167,10 +3170,19 @@ void ViewManager::setSessionProjectStatus(Session *session,
         isOtherClaudePrompt && !isOtherClaudeSession && !isClaudeSubagentEvent && !previousRetiredPromptIds.contains(normalizedPromptId);
     const bool beginsTurn = isSessionStart || isUserPromptSubmit || isPreCompact || beginsNotifiedTurn;
 
+    // Escape also closes agent dialogs, such as Claude's /usage, without
+    // interrupting the turn. A main-agent hook that arrives after the in-flight
+    // ones shows that the turn is still going. Notifications do not count:
+    // idle reminders and background subagents outlive an interrupted turn.
+    const bool isAgentNotification =
+        event.compare(QLatin1String("Notification"), Qt::CaseInsensitive) == 0 || event.compare(QLatin1String("IdlePrompt"), Qt::CaseInsensitive) == 0;
+    const bool continuesInterruptedTurn =
+        previousStatus.turnInterrupted && previousStatus.interruptedTurnHookDeadline.hasExpired() && !isClaudeSubagentEvent && !isAgentNotification;
+
     // Codex does not emit Stop when a turn is interrupted. Ignore lifecycle
     // hooks from that turn until an event explicitly begins new work.
     if (previousStatus.turnInterrupted && !agentChanged && normalizedAgent == previousStatus.agent && isSupportedAgent && !beginsTurn
-        && projectStatusFromString(status) != ProjectWorkspaceContainer::ProjectStatus::None) {
+        && !continuesInterruptedTurn && projectStatusFromString(status) != ProjectWorkspaceContainer::ProjectStatus::None) {
         qCDebug(KonsoleDebug) << "Ignoring agent hook from an interrupted turn:" << normalizedAgent << event;
         return;
     }
@@ -3306,7 +3318,8 @@ void ViewManager::setSessionProjectStatus(Session *session,
     nextStatus.agent = normalizedAgent;
     nextStatus.claudeBackgroundWork = claudeBackgroundWork;
     nextStatus.agentProcessWasForeground = agentProcessWasForeground;
-    nextStatus.turnInterrupted = previousStatus.turnInterrupted && !agentProcessChanged && !beginsTurn;
+    nextStatus.turnInterrupted = previousStatus.turnInterrupted && !agentProcessChanged && !beginsTurn && !continuesInterruptedTurn;
+    nextStatus.interruptedTurnHookDeadline = previousStatus.interruptedTurnHookDeadline;
     nextStatus.agentSessionId = agentSessionId;
     nextStatus.agentPromptId = agentPromptId;
     nextStatus.retiredAgentPromptIds = retiredAgentPromptIds;
@@ -3344,6 +3357,7 @@ void ViewManager::handleSessionAgentKey(Session *session, TabbedViewContainer *c
         status->pendingTerminalDecisionOrigin = PendingTerminalDecisionOrigin::None;
         status->statusBeforePendingTerminalDecision = ProjectWorkspaceContainer::ProjectStatus::None;
         status->turnInterrupted = true;
+        status->interruptedTurnHookDeadline.setRemainingTime(InterruptedTurnHookGracePeriodMs);
         _sessionsNeedingAttention.remove(session);
     } else if (confirmsDecision && status->pendingTerminalDecisions > 0 && status->status == ProjectWorkspaceContainer::ProjectStatus::NeedsInput) {
         --status->pendingTerminalDecisions;

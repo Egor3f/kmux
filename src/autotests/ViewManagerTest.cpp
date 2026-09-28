@@ -992,6 +992,23 @@ void ViewManagerTest::testProjectWorkspaceAgentInterruptClearsRunningStatus()
         session->setProjectStatusForAgentEvent(QStringLiteral("running"), processId, agent, QStringLiteral("UserPromptSubmit"), {}, {}, {});
         QVERIFY(!viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
         QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
+
+        // Escape that only closed a dialog: the turn keeps emitting hooks after the in-flight ones.
+        QTest::keyClick(terminal, Qt::Key_Escape);
+        QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
+        viewManager->_sessionProjectStatuses[session].interruptedTurnHookDeadline.setRemainingTime(0);
+        session->setProjectStatusForAgentEvent(QStringLiteral("idle"), processId, agent, QStringLiteral("IdlePrompt"), {}, {}, {});
+        session->setProjectStatusForAgentEvent(QStringLiteral("needsInput"), processId, agent, QStringLiteral("Notification"), {}, {}, {});
+        if (agent == QLatin1String("claude")) {
+            const QString subagentId = QStringLiteral("subagent");
+            session->setProjectStatusForAgentEvent(QStringLiteral("running"), processId, agent, QStringLiteral("PreToolUse"), {}, {}, subagentId);
+        }
+        QVERIFY(viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
+        QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
+
+        session->setProjectStatusForAgentEvent(QStringLiteral("running"), processId, agent, QStringLiteral("PreToolUse"), {}, {}, {});
+        QVERIFY(!viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
+        QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
     }
 
     session->setProjectStatusForAgentEvent(QStringLiteral("running"), processId, QStringLiteral("other"), QStringLiteral("UserPromptSubmit"), {}, {}, {});
