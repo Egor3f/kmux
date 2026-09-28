@@ -89,6 +89,11 @@ Claude does not animate the title: Escape then shows Claude as idle right away,
 and if the turn goes on, the running status returns with Claude's next tool
 call made more than five seconds after the key press.
 
+After a turn ends, Claude Code remains shown as running while its background
+subagents or workflows work. Background shells, such as a development server,
+and monitors do not keep it running, because they may run for as long as the
+session.
+
 When Claude Code reports that a turn stopped because of a rate limit, Kmux
 shows an amber clock in the terminal tab and project rail. The exclamation
 mark remains reserved for requests for input or permission. When another
