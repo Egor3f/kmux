@@ -1073,13 +1073,15 @@ void ViewManagerTest::testProjectWorkspaceClaudeEscapeFollowsTitle()
     setTitle(QStringLiteral("\u25D1 Task"));
     QVERIFY(viewManager->_pendingClaudeEscapes.contains(session));
     setTitle(QStringLiteral("\u2733 Task"));
-    QVERIFY(!viewManager->_pendingClaudeEscapes.contains(session));
     QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
     QVERIFY(viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
     QVERIFY(viewManager->_sessionProjectStatuses.value(session).interruptedTurnHookDeadline.isForever());
+    session->setProjectStatusForAgentEvent(QStringLiteral("running"), processId, QStringLiteral("claude"), QStringLiteral("PostToolUse"), {}, {}, {});
+    QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
 
     // Escape that only closes a dialog: the spinner keeps turning.
     startTurn();
+    QVERIFY(!viewManager->_pendingClaudeEscapes.contains(session));
     QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
     setTitle(QStringLiteral("\u25D0 Task"));
     QTest::keyClick(terminal, Qt::Key_Escape);
@@ -1095,6 +1097,75 @@ void ViewManagerTest::testProjectWorkspaceClaudeEscapeFollowsTitle()
     QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
     QVERIFY(viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
     QVERIFY(!viewManager->_sessionProjectStatuses.value(session).interruptedTurnHookDeadline.isForever());
+}
+
+void ViewManagerTest::testProjectWorkspaceClaudeEscapeKeepsPermissionPrompt()
+{
+    auto mw = MainWindow();
+    auto *viewManager = mw.viewManager();
+    auto *workspaces = viewManager->_workspaceContainer.data();
+    QVERIFY(workspaces != nullptr);
+
+    mw.newTab();
+    auto *project = viewManager->activeContainer();
+    QVERIFY(project != nullptr);
+    auto *terminal = project->activeViewSplitter()->activeTerminalDisplay();
+    QVERIFY(terminal != nullptr);
+    Session *session = terminal->sessionController()->session();
+    QVERIFY(session != nullptr);
+
+    const qlonglong processId = QCoreApplication::applicationPid();
+    const QString agent = QStringLiteral("claude");
+    const auto setTitle = [session](const QString &title) {
+        session->setSessionAttribute(Session::IconNameAndWindowTitle, title);
+    };
+    const auto pressEscapeWhileWorking = [&]() {
+        session->setProjectStatusForAgentEvent(QStringLiteral("running"), processId, agent, QStringLiteral("UserPromptSubmit"), {}, {}, {});
+        setTitle(QStringLiteral("◐ Task"));
+        QTest::keyClick(terminal, Qt::Key_Escape);
+        QVERIFY(viewManager->_pendingClaudeEscapes.contains(session));
+    };
+    const auto requestPermission = [&](const QString &agentId = {}) {
+        session->setProjectStatusForAgentEvent(QStringLiteral("needsInput"), processId, agent, QStringLiteral("PermissionRequest"), {}, {}, agentId);
+    };
+    const auto verifyNeedsInput = [&]() {
+        QVERIFY(!viewManager->_pendingClaudeEscapes.contains(session));
+        QVERIFY(!viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
+        QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::NeedsInput);
+    };
+
+    // Escape closed a dialog, and Claude then asks for permission. The hook
+    // arrives before the idle glyph that Claude shows for the prompt.
+    pressEscapeWhileWorking();
+    requestPermission();
+    setTitle(QStringLiteral("✳ Task"));
+    verifyNeedsInput();
+
+    // The same prompt when its hook arrives after the title.
+    pressEscapeWhileWorking();
+    setTitle(QStringLiteral("✳ Task"));
+    QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
+    requestPermission(QStringLiteral("subagent"));
+    QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
+    requestPermission();
+    verifyNeedsInput();
+
+    // Once the pending hooks must have arrived, Escape counts as an interrupt.
+    pressEscapeWhileWorking();
+    setTitle(QStringLiteral("✳ Task"));
+    QTRY_VERIFY_WITH_TIMEOUT(!viewManager->_pendingClaudeEscapes.contains(session), 10000);
+    requestPermission();
+    QVERIFY(viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
+    QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Idle);
+
+    // An Escape pending from the previous turn leaves the next one alone.
+    pressEscapeWhileWorking();
+    session->setProjectStatusForAgentEvent(QStringLiteral("idle"), processId, agent, QStringLiteral("Stop"), {}, {}, {});
+    session->setProjectStatusForAgentEvent(QStringLiteral("running"), processId, agent, QStringLiteral("UserPromptSubmit"), {}, {}, {});
+    QVERIFY(!viewManager->_pendingClaudeEscapes.contains(session));
+    setTitle(QStringLiteral("✳ Task"));
+    QVERIFY(!viewManager->_sessionProjectStatuses.value(session).turnInterrupted);
+    QCOMPARE(workspaces->projectStatus(project), ProjectWorkspaceContainer::ProjectStatus::Running);
 }
 
 void ViewManagerTest::testProjectWorkspaceCodexAutoReviewedPermissionStaysRunning()

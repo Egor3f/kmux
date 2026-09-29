@@ -574,7 +574,9 @@ private:
                                  const QString &agentId = {});
     void handleSessionAgentKey(Session *session, TabbedViewContainer *container, QKeyEvent *keyEvent);
     void watchClaudeEscape(Session *session);
-    void resolveClaudeEscape(Session *session);
+    void interruptEscapedClaudeTurn(Session *session);
+    void forgetClaudeEscapeAfter(Session *session, int timeoutMs);
+    void forgetClaudeEscape(Session *session);
     void interruptSessionTurn(Session *session, QDeadlineTimer interruptedTurnHookDeadline);
     void clearExitedSessionProjectStatuses();
     void updateProjectStatusProcessTimer();

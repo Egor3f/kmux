@@ -40,6 +40,7 @@ private Q_SLOTS:
     void testProjectWorkspaceCodexDecisionKeysAreSessionScoped();
     void testProjectWorkspaceAgentInterruptClearsRunningStatus();
     void testProjectWorkspaceClaudeEscapeFollowsTitle();
+    void testProjectWorkspaceClaudeEscapeKeepsPermissionPrompt();
     void testProjectWorkspaceCodexAutoReviewedPermissionStaysRunning();
     void testProjectWorkspaceClaudeDenialDoesNotOverrideStop();
     void testProjectWorkspaceClaudeIdlePromptMarksInactiveProject();

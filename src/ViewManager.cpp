@@ -3202,6 +3202,12 @@ void ViewManager::setSessionProjectStatus(Session *session,
         isOtherClaudePrompt && !isOtherClaudeSession && !isClaudeSubagentEvent && !previousRetiredPromptIds.contains(normalizedPromptId);
     const bool beginsTurn = isSessionStart || isUserPromptSubmit || isPreCompact || beginsNotifiedTurn;
     const bool isInterrupt = event.compare(QLatin1String("Interrupt"), Qt::CaseInsensitive) == 0;
+    const bool isPermissionRequest = event.compare(QLatin1String("PermissionRequest"), Qt::CaseInsensitive) == 0;
+
+    // Claude shows its idle glyph for a permission prompt as it does after an
+    // interrupt, so a main-agent permission request after Escape shows that
+    // Escape did not interrupt the turn.
+    const bool continuesEscapedClaudeTurn = isClaudeEvent && !isClaudeSubagentEvent && isPermissionRequest && _pendingClaudeEscapes.contains(session);
 
     // Escape also closes agent dialogs, such as Claude's /usage, without
     // interrupting the turn. A main-agent hook that arrives after the in-flight
@@ -3209,8 +3215,8 @@ void ViewManager::setSessionProjectStatus(Session *session,
     // idle reminders and background subagents outlive an interrupted turn.
     const bool isAgentNotification =
         event.compare(QLatin1String("Notification"), Qt::CaseInsensitive) == 0 || event.compare(QLatin1String("IdlePrompt"), Qt::CaseInsensitive) == 0;
-    const bool continuesInterruptedTurn =
-        previousStatus.turnInterrupted && previousStatus.interruptedTurnHookDeadline.hasExpired() && !isClaudeSubagentEvent && !isAgentNotification;
+    const bool continuesInterruptedTurn = previousStatus.turnInterrupted && !isClaudeSubagentEvent && !isAgentNotification
+        && (previousStatus.interruptedTurnHookDeadline.hasExpired() || continuesEscapedClaudeTurn);
 
     // An interrupted turn does not emit Stop, and hooks from its in-flight work
     // can still arrive. Ignore them until an event explicitly begins new work.
@@ -3253,6 +3259,12 @@ void ViewManager::setSessionProjectStatus(Session *session,
         return;
     }
 
+    // Once the turn goes on or new work begins, the title no longer tells
+    // what that Escape did.
+    if (beginsTurn || continuesEscapedClaudeTurn) {
+        forgetClaudeEscape(session);
+    }
+
     QString agentSessionId;
     QString agentPromptId;
     QStringList retiredAgentPromptIds;
@@ -3287,7 +3299,6 @@ void ViewManager::setSessionProjectStatus(Session *session,
     }
 
     const bool isCodexEvent = agent.compare(QLatin1String("codex"), Qt::CaseInsensitive) == 0;
-    const bool isPermissionRequest = event.compare(QLatin1String("PermissionRequest"), Qt::CaseInsensitive) == 0;
     const bool isIdlePrompt = event.compare(QLatin1String("IdlePrompt"), Qt::CaseInsensitive) == 0;
     const bool isNotification = event.compare(QLatin1String("Notification"), Qt::CaseInsensitive) == 0;
     const bool startsTurn = beginsTurn;
@@ -3417,22 +3428,44 @@ void ViewManager::watchClaudeEscape(Session *session)
         return;
     }
 
-    PendingClaudeEscape &pending = _pendingClaudeEscapes[session];
-    pending.serial = ++_claudeEscapeSerial;
-    pending.titleConnection = connect(session, &Session::sessionAttributeChanged, this, [this, session]() {
+    _pendingClaudeEscapes[session].titleConnection = connect(session, &Session::sessionAttributeChanged, this, [this, session]() {
         if (claudeTitleActivity(session->userTitle()) == ClaudeTitleActivity::Idle) {
-            resolveClaudeEscape(session);
+            interruptEscapedClaudeTurn(session);
         }
     });
-    QTimer::singleShot(ClaudeEscapeTitleTimeoutMs, this, [this, session, serial = pending.serial]() {
-        const auto watched = _pendingClaudeEscapes.constFind(session);
-        if (watched != _pendingClaudeEscapes.constEnd() && watched->serial == serial) {
-            resolveClaudeEscape(session);
+    // A spinner that keeps turning means that Escape only closed a dialog.
+    forgetClaudeEscapeAfter(session, ClaudeEscapeTitleTimeoutMs);
+}
+
+void ViewManager::interruptEscapedClaudeTurn(Session *session)
+{
+    const auto pending = _pendingClaudeEscapes.constFind(session);
+    if (pending == _pendingClaudeEscapes.constEnd()) {
+        return;
+    }
+
+    disconnect(pending->titleConnection);
+    // Claude showed the interrupt itself, so no later hook continues that turn.
+    // Claude shows the same glyph for a permission prompt, though, and Kmux may
+    // receive its PermissionRequest hook after the title, so keep the Escape
+    // pending until the hooks that were in flight have arrived.
+    interruptSessionTurn(session, QDeadlineTimer(QDeadlineTimer::Forever));
+    forgetClaudeEscapeAfter(session, InterruptedTurnHookGracePeriodMs);
+}
+
+void ViewManager::forgetClaudeEscapeAfter(Session *session, int timeoutMs)
+{
+    const quint64 serial = ++_claudeEscapeSerial;
+    _pendingClaudeEscapes[session].serial = serial;
+    QTimer::singleShot(timeoutMs, this, [this, session, serial]() {
+        const auto pending = _pendingClaudeEscapes.constFind(session);
+        if (pending != _pendingClaudeEscapes.constEnd() && pending->serial == serial) {
+            forgetClaudeEscape(session);
         }
     });
 }
 
-void ViewManager::resolveClaudeEscape(Session *session)
+void ViewManager::forgetClaudeEscape(Session *session)
 {
     const auto pending = _pendingClaudeEscapes.constFind(session);
     if (pending == _pendingClaudeEscapes.constEnd()) {
@@ -3441,11 +3474,6 @@ void ViewManager::resolveClaudeEscape(Session *session)
 
     disconnect(pending->titleConnection);
     _pendingClaudeEscapes.erase(pending);
-    // A spinner that keeps turning means that Escape only closed a dialog.
-    if (claudeTitleActivity(session->userTitle()) == ClaudeTitleActivity::Idle) {
-        // Claude showed the interrupt itself, so no later hook continues that turn.
-        interruptSessionTurn(session, QDeadlineTimer(QDeadlineTimer::Forever));
-    }
 }
 
 void ViewManager::interruptSessionTurn(Session *session, QDeadlineTimer interruptedTurnHookDeadline)

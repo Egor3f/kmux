@@ -84,7 +84,9 @@ Codex reports an interrupted turn with its `Interrupt` hook, and Kmux shows it
 as idle. Claude Code reports no such event, and Escape may only close a dialog,
 such as `/usage`. While a turn runs, Claude animates a spinner at the start of
 the terminal title, so after Escape Kmux shows Claude as idle only when the
-spinner gives way to Claude's idle mark, ✳. Under tmux, screen, or zellij,
+spinner gives way to Claude's idle mark, ✳. Claude shows the same mark while it
+asks for permission, so a permission request that follows shows the request
+instead. Under tmux, screen, or zellij,
 Claude does not animate the title: Escape then shows Claude as idle right away,
 and if the turn goes on, the running status returns with Claude's next tool
 call made more than five seconds after the key press.
