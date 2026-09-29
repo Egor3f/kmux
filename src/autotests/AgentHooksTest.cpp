@@ -46,6 +46,10 @@ private Q_SLOTS:
     void testUninstallLeavesNoEmptyHooks();
     void testHomeScopedScripts_data();
     void testHomeScopedScripts();
+    void testHookCommandsQuoteScriptPaths_data();
+    void testHookCommandsQuoteScriptPaths();
+    void testReinstallReplacesUnquotedHookCommands_data();
+    void testReinstallReplacesUnquotedHookCommands();
 };
 
 void AgentHooksTest::testCodexLauncherHookInstallation_data()
@@ -1281,6 +1285,216 @@ void AgentHooksTest::testHomeScopedScripts()
     result = runHooks(secondHome, QStringLiteral("status"));
     QVERIFY(result.first != 0);
     QVERIFY(result.second.contains(QStringLiteral("Invalid hook script: %1").arg(brokenHandler)));
+}
+
+void AgentHooksTest::testHookCommandsQuoteScriptPaths_data()
+{
+    QTest::addColumn<QString>("agent");
+    QTest::addColumn<QString>("homeOption");
+    QTest::addColumn<QString>("settingsFile");
+    QTest::addColumn<int>("handlerCount");
+
+    QTest::newRow("codex") << QStringLiteral("codex") << QStringLiteral("--codex-home") << QStringLiteral("hooks.json") << 9;
+    QTest::newRow("claude") << QStringLiteral("claude") << QStringLiteral("--claude-home") << QStringLiteral("settings.json") << 14;
+}
+
+void AgentHooksTest::testHookCommandsQuoteScriptPaths()
+{
+    QFETCH(QString, agent);
+    QFETCH(QString, homeOption);
+    QFETCH(QString, settingsFile);
+    QFETCH(int, handlerCount);
+
+    QTemporaryDir temporaryDir;
+    QVERIFY(temporaryDir.isValid());
+    const QString dataHome = temporaryDir.filePath(QStringLiteral("agent data's home"));
+    const QString configHome = temporaryDir.filePath(QStringLiteral("agent-home"));
+
+    const auto runHooks = [&dataHome, &homeOption, &configHome, &agent](const QString &command) {
+        QProcess process;
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("XDG_DATA_HOME"), dataHome);
+        process.setProcessEnvironment(environment);
+        process.start(QStringLiteral(KMUX_AGENT_HOOKS_EXECUTABLE), {homeOption, configHome, command, agent});
+        if (!process.waitForStarted() || !process.waitForFinished()) {
+            return qMakePair(-1, QStringLiteral("Could not run kmux-agent-hooks: %1").arg(process.errorString()));
+        }
+        const QString output = QString::fromUtf8(process.readAllStandardOutput()) + QString::fromUtf8(process.readAllStandardError());
+        return qMakePair(process.exitStatus() == QProcess::NormalExit ? process.exitCode() : -1, output);
+    };
+    const auto hookCommands = [&configHome, &settingsFile]() {
+        QFile file(QDir(configHome).filePath(settingsFile));
+        if (!file.open(QIODevice::ReadOnly)) {
+            return QStringList();
+        }
+
+        QStringList commands;
+        const QJsonObject hooks = QJsonDocument::fromJson(file.readAll()).object().value(QStringLiteral("hooks")).toObject();
+        for (const QJsonValue &eventValue : hooks) {
+            for (const QJsonValue &groupValue : eventValue.toArray()) {
+                for (const QJsonValue &hookValue : groupValue.toObject().value(QStringLiteral("hooks")).toArray()) {
+                    const QString command = hookValue.toObject().value(QStringLiteral("command")).toString();
+                    if (command.contains(QStringLiteral("/kmux/hooks/"))) {
+                        commands.append(command);
+                    }
+                }
+            }
+        }
+        return commands;
+    };
+
+    auto result = runHooks(QStringLiteral("install"));
+    QVERIFY2(result.first == 0, qPrintable(result.second));
+    // A repeated installation must recognize the quoted commands as its own.
+    result = runHooks(QStringLiteral("install"));
+    QVERIFY2(result.first == 0, qPrintable(result.second));
+
+    const QStringList commands = hookCommands();
+    QCOMPARE(commands.size(), handlerCount);
+    for (const QString &command : commands) {
+        QVERIFY2(command.startsWith(QLatin1Char('\'')), qPrintable(command));
+    }
+
+    // Agents run hook commands through a shell. Without the Kmux session
+    // variables the helper only answers the hook.
+    QProcessEnvironment hookEnvironment = QProcessEnvironment::systemEnvironment();
+    hookEnvironment.remove(QStringLiteral("KMUX_DBUS_SERVICE"));
+    hookEnvironment.remove(QStringLiteral("KMUX_DBUS_SESSION"));
+    hookEnvironment.remove(QStringLiteral("KMUX_AGENT_HOOK_LOG"));
+    QProcess hook;
+    hook.setProcessEnvironment(hookEnvironment);
+    hook.start(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), commands.constFirst()});
+    QVERIFY(hook.waitForStarted());
+    hook.write("{}\n");
+    hook.closeWriteChannel();
+    QVERIFY(hook.waitForFinished(5000));
+    QCOMPARE(hook.exitStatus(), QProcess::NormalExit);
+    QVERIFY2(hook.exitCode() == 0, hook.readAllStandardError().constData());
+    QCOMPARE(hook.readAllStandardOutput().trimmed(), QByteArrayLiteral("{}"));
+
+    result = runHooks(QStringLiteral("status"));
+    QVERIFY2(result.first == 0, qPrintable(result.second));
+    QVERIFY2(result.second.contains(QStringLiteral("Hook scripts: %1/%1 executable").arg(handlerCount)), qPrintable(result.second));
+
+    result = runHooks(QStringLiteral("uninstall"));
+    QVERIFY2(result.first == 0, qPrintable(result.second));
+    QVERIFY(hookCommands().isEmpty());
+}
+
+void AgentHooksTest::testReinstallReplacesUnquotedHookCommands_data()
+{
+    QTest::addColumn<QString>("agent");
+    QTest::addColumn<QString>("homeOption");
+    QTest::addColumn<QString>("settingsFile");
+    QTest::addColumn<int>("handlerCount");
+    QTest::addColumn<QString>("dataDirectory");
+
+    const QStringList dataDirectories = {QStringLiteral("data home"), QStringLiteral("data home's"), QStringLiteral("data 'quoted' home")};
+    for (const QString &dataDirectory : dataDirectories) {
+        QTest::addRow("codex, %s", qPrintable(dataDirectory))
+            << QStringLiteral("codex") << QStringLiteral("--codex-home") << QStringLiteral("hooks.json") << 9 << dataDirectory;
+        QTest::addRow("claude, %s", qPrintable(dataDirectory))
+            << QStringLiteral("claude") << QStringLiteral("--claude-home") << QStringLiteral("settings.json") << 14 << dataDirectory;
+    }
+}
+
+void AgentHooksTest::testReinstallReplacesUnquotedHookCommands()
+{
+    QFETCH(QString, agent);
+    QFETCH(QString, homeOption);
+    QFETCH(QString, settingsFile);
+    QFETCH(int, handlerCount);
+    QFETCH(QString, dataDirectory);
+
+    QTemporaryDir temporaryDir;
+    QVERIFY(temporaryDir.isValid());
+    const QString dataHome = temporaryDir.filePath(dataDirectory);
+    const QString configHome = temporaryDir.filePath(QStringLiteral("agent-home"));
+    const QString settingsPath = QDir(configHome).filePath(settingsFile);
+
+    const auto runHooks = [&dataHome, &homeOption, &configHome, &agent](const QString &command) {
+        QProcess process;
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("XDG_DATA_HOME"), dataHome);
+        process.setProcessEnvironment(environment);
+        process.start(QStringLiteral(KMUX_AGENT_HOOKS_EXECUTABLE), {homeOption, configHome, command, agent, QStringLiteral("--quiet")});
+        if (!process.waitForStarted() || !process.waitForFinished()) {
+            return QStringLiteral("Could not run kmux-agent-hooks: %1").arg(process.errorString());
+        }
+        if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+            return QString::fromUtf8(process.readAllStandardError());
+        }
+        return QString();
+    };
+    const auto hookCommands = [&settingsPath]() {
+        QFile file(settingsPath);
+        if (!file.open(QIODevice::ReadOnly)) {
+            return QStringList();
+        }
+
+        QStringList commands;
+        const QJsonObject hooks = QJsonDocument::fromJson(file.readAll()).object().value(QStringLiteral("hooks")).toObject();
+        for (const QJsonValue &eventValue : hooks) {
+            for (const QJsonValue &groupValue : eventValue.toArray()) {
+                for (const QJsonValue &hookValue : groupValue.toObject().value(QStringLiteral("hooks")).toArray()) {
+                    const QString command = hookValue.toObject().value(QStringLiteral("command")).toString();
+                    if (command.contains(QStringLiteral("/kmux/hooks/"))) {
+                        commands.append(command);
+                    }
+                }
+            }
+        }
+        return commands;
+    };
+
+    QString error = runHooks(QStringLiteral("install"));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+
+    // Earlier versions wrote the script path as it is, without shell quotes.
+    QFile settings(settingsPath);
+    QVERIFY(settings.open(QIODevice::ReadOnly));
+    QJsonObject root = QJsonDocument::fromJson(settings.readAll()).object();
+    settings.close();
+    int legacyCommands = 0;
+    QJsonObject hooks = root.value(QStringLiteral("hooks")).toObject();
+    for (const QString &eventName : hooks.keys()) {
+        QJsonArray groups = hooks.value(eventName).toArray();
+        for (qsizetype groupIndex = 0; groupIndex < groups.size(); ++groupIndex) {
+            QJsonObject group = groups.at(groupIndex).toObject();
+            QJsonArray handlers = group.value(QStringLiteral("hooks")).toArray();
+            for (qsizetype handlerIndex = 0; handlerIndex < handlers.size(); ++handlerIndex) {
+                QJsonObject handler = handlers.at(handlerIndex).toObject();
+                QString command = handler.value(QStringLiteral("command")).toString();
+                if (command.startsWith(QLatin1Char('\''))) {
+                    command = command.mid(1, command.size() - 2).replace(QStringLiteral("'\"'\"'"), QStringLiteral("'"));
+                    handler.insert(QStringLiteral("command"), command);
+                    handlers[handlerIndex] = handler;
+                    ++legacyCommands;
+                }
+            }
+            group.insert(QStringLiteral("hooks"), handlers);
+            groups[groupIndex] = group;
+        }
+        hooks.insert(eventName, groups);
+    }
+    root.insert(QStringLiteral("hooks"), hooks);
+    QCOMPARE(legacyCommands, handlerCount);
+    QVERIFY(settings.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    const QByteArray legacySettings = QJsonDocument(root).toJson();
+    QCOMPARE(settings.write(legacySettings), legacySettings.size());
+    settings.close();
+
+    error = runHooks(QStringLiteral("install"));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    const QStringList commands = hookCommands();
+    QCOMPARE(commands.size(), handlerCount);
+    for (const QString &command : commands) {
+        QVERIFY2(command.startsWith(QLatin1Char('\'')), qPrintable(command));
+    }
+
+    error = runHooks(QStringLiteral("uninstall"));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(hookCommands().isEmpty());
 }
 
 QTEST_GUILESS_MAIN(AgentHooksTest)

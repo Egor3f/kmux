@@ -207,6 +207,38 @@ QString hookScriptPath(const QString &scriptDirectory, const QString &agentName,
     return QDir(scriptDirectory).filePath(QStringLiteral("%1-%2.sh").arg(agentName, event.eventLabel));
 }
 
+// Agents run a hook command through a shell. A plain script path stays
+// unquoted, so existing configurations and trust hashes remain unchanged.
+QString hookCommand(const QString &scriptPath)
+{
+    const QLatin1String shellSafeSymbols("/._-+,:@%=");
+    const bool shellSafe = std::all_of(scriptPath.cbegin(), scriptPath.cend(), [shellSafeSymbols](QChar ch) {
+        return ch.unicode() < 0x80 && (ch.isLetterOrNumber() || shellSafeSymbols.contains(ch));
+    });
+    return shellSafe ? scriptPath : shellQuote(scriptPath);
+}
+
+// Reverses hookCommand() by removing the shell quotes.
+QString hookCommandScriptPath(const QString &command)
+{
+    QString scriptPath;
+    QChar quote;
+    for (const QChar ch : command) {
+        if (!quote.isNull()) {
+            if (ch == quote) {
+                quote = QChar();
+            } else {
+                scriptPath += ch;
+            }
+        } else if (ch == QLatin1Char('\'') || ch == QLatin1Char('"')) {
+            quote = ch;
+        } else {
+            scriptPath += ch;
+        }
+    }
+    return quote.isNull() ? scriptPath : command;
+}
+
 QString hookScriptContent(const QString &agentName, const HookEvent &event)
 {
     const QString helper = projectStatusHelperPath();
@@ -320,9 +352,9 @@ QJsonObject readJsonObject(const QString &path, QString *error)
     return document.object();
 }
 
-bool commandIsKmuxOwned(const QString &command, const QString &scriptDirectory, const QString &agentName)
+bool isKmuxHookScript(const QString &scriptPath, const QString &scriptDirectory, const QString &agentName)
 {
-    const QFileInfo commandInfo(command);
+    const QFileInfo commandInfo(scriptPath);
     const QString commandDirectory = QDir::cleanPath(commandInfo.absolutePath());
     const QString currentScriptDirectory = QDir::cleanPath(QFileInfo(scriptDirectory).absoluteFilePath());
     const QString previousScriptDirectory = QDir::cleanPath(QFileInfo(hookScriptRootDirectory()).absoluteFilePath());
@@ -331,6 +363,25 @@ bool commandIsKmuxOwned(const QString &command, const QString &scriptDirectory, 
 
     return (commandDirectory == currentScriptDirectory || commandDirectory == previousScriptDirectory || commandDirectory == legacyScriptDirectory)
         && commandInfo.fileName().startsWith(scriptNamePrefix) && commandInfo.fileName().endsWith(QLatin1String(".sh"));
+}
+
+// Returns the Kmux script that a hook command runs, or an empty string for a
+// command that Kmux does not own. Earlier versions wrote the script path
+// without shell quotes, and such a path can itself contain quotes, so the
+// command is checked as written before its quotes are removed.
+QString kmuxHookScriptPath(const QString &command, const QString &scriptDirectory, const QString &agentName)
+{
+    for (const QString &scriptPath : {command, hookCommandScriptPath(command)}) {
+        if (isKmuxHookScript(scriptPath, scriptDirectory, agentName)) {
+            return scriptPath;
+        }
+    }
+    return {};
+}
+
+bool commandIsKmuxOwned(const QString &command, const QString &scriptDirectory, const QString &agentName)
+{
+    return !kmuxHookScriptPath(command, scriptDirectory, agentName).isEmpty();
 }
 
 QJsonArray removeKmuxOwnedHookGroups(QJsonArray groups, const QString &scriptDirectory, const QString &agentName)
@@ -373,7 +424,7 @@ QJsonObject buildHookGroup(const QString &scriptDirectory, const QString &agentN
 {
     QJsonObject hook;
     hook.insert(QStringLiteral("type"), QStringLiteral("command"));
-    hook.insert(QStringLiteral("command"), hookScriptPath(scriptDirectory, agentName, event));
+    hook.insert(QStringLiteral("command"), hookCommand(hookScriptPath(scriptDirectory, agentName, event)));
     hook.insert(QStringLiteral("timeout"), event.timeout);
 
     QJsonArray hooks;
@@ -897,13 +948,14 @@ HookInstallationStatus hookInstallationStatus(const QJsonObject &hooks, const QS
             bool ownedGroup = false;
             for (const QJsonValue &hookValue : hookList) {
                 const QString command = hookValue.toObject().value(QStringLiteral("command")).toString();
-                if (!commandIsKmuxOwned(command, scriptDirectory, agentName)) {
+                const QString scriptPath = kmuxHookScriptPath(command, scriptDirectory, agentName);
+                if (scriptPath.isEmpty()) {
                     continue;
                 }
 
                 ownedGroup = true;
                 ++status.handlers;
-                const QFileInfo handlerInfo(command);
+                const QFileInfo handlerInfo(scriptPath);
                 if (handlerInfo.isFile() && handlerInfo.isExecutable()) {
                     ++status.executableHandlers;
                 } else {
