@@ -32,6 +32,8 @@ private Q_SLOTS:
     void testLauncherEmbeddedServerArgument_data();
     void testLauncherEmbeddedServerArgument();
     void testCodexLauncherSkipsSelfSymlink();
+    void testCodexLauncherRunsScriptWithoutShebang_data();
+    void testCodexLauncherRunsScriptWithoutShebang();
     void testCodexLauncherReportsMissingAgent();
     void testCodexCommandUsesTransparentLauncher();
     void testCodexTrustHashesMatchCurrentIdentity();
@@ -212,6 +214,47 @@ void AgentHooksTest::testCodexLauncherSkipsSelfSymlink()
     QCOMPARE(process.exitStatus(), QProcess::NormalExit);
     QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
     QCOMPARE(process.readAllStandardOutput().trimmed(), QByteArrayLiteral("real-codex:argument"));
+}
+
+void AgentHooksTest::testCodexLauncherRunsScriptWithoutShebang_data()
+{
+    QTest::addColumn<QStringList>("arguments");
+
+    QTest::newRow("no arguments") << QStringList();
+    QTest::newRow("shell option and spaces") << QStringList{QStringLiteral("--help"), QStringLiteral("two words")};
+}
+
+void AgentHooksTest::testCodexLauncherRunsScriptWithoutShebang()
+{
+    QFETCH(QStringList, arguments);
+
+    QTemporaryDir temporaryDir;
+    QVERIFY(temporaryDir.isValid());
+    const QString agentBinDir = temporaryDir.filePath(QStringLiteral("agent-bin"));
+    QVERIFY(QDir().mkpath(agentBinDir));
+
+    const QString agentPath = QDir(agentBinDir).filePath(QStringLiteral("codex"));
+    QFile agent(agentPath);
+    QVERIFY(agent.open(QIODevice::WriteOnly | QIODevice::Text));
+    const QByteArray script = QByteArrayLiteral("for argument do printf '%s\\n' \"$argument\"; done\n");
+    QCOMPARE(agent.write(script), script.size());
+    agent.close();
+    QVERIFY(QFile::setPermissions(agentPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("PATH"), agentBinDir + QDir::listSeparator() + environment.value(QStringLiteral("PATH")));
+    environment.insert(QStringLiteral("KMUX_CODEX_HOOKS_DISABLED"), QStringLiteral("1"));
+
+    QProcess process;
+    process.setProcessEnvironment(environment);
+    process.start(QStringLiteral(KMUX_CODEX_EXECUTABLE), arguments);
+    QVERIFY(process.waitForStarted());
+    QVERIFY2(process.waitForFinished(5000), "the shell did not run the agent script");
+    QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+    QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+
+    const QString output = QString::fromUtf8(process.readAllStandardOutput());
+    QCOMPARE(output.split(QLatin1Char('\n'), Qt::SkipEmptyParts), arguments);
 }
 
 void AgentHooksTest::testCodexLauncherReportsMissingAgent()

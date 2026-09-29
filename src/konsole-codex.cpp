@@ -151,11 +151,15 @@ bool executableIdentity(const char *executable, struct stat &identity)
     return false;
 }
 
+// Runs an executable without a "#!" line as execvp() does: the shell reads the
+// script, and the agent arguments follow the script path.
 void execShellScript(const std::string &script, const std::vector<char *> &args)
 {
     std::vector<char *> shellArgs;
     shellArgs.reserve(args.size() + 1);
+    shellArgs.push_back(const_cast<char *>("/bin/sh"));
     shellArgs.push_back(const_cast<char *>(script.c_str()));
+    // args starts with the agent name and ends with the null terminator.
     shellArgs.insert(shellArgs.end(), args.begin() + 1, args.end());
     execv("/bin/sh", shellArgs.data());
 }
