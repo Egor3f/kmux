@@ -33,9 +33,11 @@ sudo pacman -S --needed git cmake ninja gcc pkgconf extra-cmake-modules \
 To run the tests, also install `dbus` and `which`; with `appstream`
 installed, CTest also validates the AppStream metadata.
 
-To install Kmux as a package instead, build it from
-`packaging/aur/kmux-workspaces` with `makepkg -si`. The `PKGBUILD` downloads
-the source archive of the release tag it names.
+To install Kmux as a package instead, build it with `makepkg -si` from
+`packaging/aur/kmux-workspaces-git`, which clones the current `master` branch
+from GitHub, or from `packaging/aur/kmux-workspaces`, which downloads the
+source archive of the release tag it names. The release package works only
+once that tag is published.
 
 ### Other distributions
 
@@ -127,6 +129,6 @@ installed application behaves as a standalone product.
 | `data` | Bundled profiles, keyboard layouts, color schemes, layouts, and project icons. |
 | `doc` | The Kmux user guide, and upstream Konsole documentation sources kept for reference; the Konsole handbook is not installed. |
 | `po` | Translation catalogs inherited from Konsole. |
-| `packaging` | Arch Linux `PKGBUILD` and a script to test it before a release tag exists. |
+| `packaging` | Arch Linux `PKGBUILD`s for the release and development packages, and a script to test the release package before its tag exists. |
 | `tools` | `kmuxprofile`, the CI scripts, and the screenshot demo workspace. |
 | `tests` / `src/autotests` | Upstream and fork tests. Some upstream tests still refer to Konsole names and need follow-up updates. |

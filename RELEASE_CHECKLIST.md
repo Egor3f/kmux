@@ -129,9 +129,16 @@ suggest a relationship that does not exist. The package name does not need to
 match the display name; the application remains Kmux. The package must declare
 explicit `conflicts` for unrelated packages that install the same file paths.
 
-The stable AUR package should not build from `master`. A development-snapshot
-package, if added later, must use a distinct name such as
-`kmux-workspaces-git` rather than `kmux-git`.
+The stable AUR package should not build from `master`. The development-snapshot
+package is named `kmux-workspaces-git` rather than `kmux-git`.
+
+Decided on 2026-09-29: publish `kmux-workspaces-git` first, before the alpha
+tag. Changes land on `master` almost daily, and AUR registration is closed, so
+another AUR user submits the package on the maintainer's behalf. A release
+package would need that user for every tag (new `pkgver`, checksum, and
+`.SRCINFO`); the development package needs an update only when dependencies or
+build options change. It also does not present an untagged tree as a release.
+`kmux-workspaces` follows once the alpha release gate passes.
 
 Recommended initial CMake configuration for the AUR package:
 
@@ -148,6 +155,7 @@ Validate the package using `makepkg`, `namcap`, and an Arch clean chroot.
 
 Recommended order:
 
+0. AUR `kmux-workspaces-git` (development snapshots, see above);
 1. GitHub prerelease and source archive;
 2. AUR `kmux-workspaces`;
 3. Flatpak/Flathub;
@@ -928,7 +936,10 @@ an additional immutable desktop once Flatpak becomes an advertised channel.
       announced on aur-general and the Arch news feed. This blocks only the
       AUR upload. If registration stays closed at release time, the release
       notes can point Arch users to `makepkg -si` in
-      `packaging/aur/kmux-workspaces/`.
+      `packaging/aur/kmux-workspaces/`. As of 2026-09-29 another AUR user
+      submits the packages on the maintainer's behalf.
+- [ ] Once registration reopens, have the submitting user add the Kmux
+      maintainer as a co-maintainer of both AUR packages.
 - [x] Choose `kmux-workspaces` as the AUR package name, distinct from the
       unrelated existing `kmux-git` package.
 - [ ] Confirm that `kmux-workspaces` is still available immediately before
@@ -953,8 +964,9 @@ an additional immutable desktop once Flatpak becomes an advertised channel.
 - [x] Verify side-by-side operation with Arch's `konsole` package.
 - [x] Remove the package and check for unexpected system leftovers.
 - [ ] Keep the AUR packaging history in an appropriate packaging repository.
-- [ ] Optionally add a separate `kmux-workspaces-git` package after the stable
-      package is established.
+- [x] Draft the development package in `packaging/aur/kmux-workspaces-git/`.
+- [x] Build it from GitHub `master` in a fresh container and run `namcap`.
+- [ ] Submit `kmux-workspaces-git` to the AUR before the alpha tag.
 
 The draft `PKGBUILD` follows Arch's `konsole` package: the same runtime
 dependencies, `extra-cmake-modules` and `ninja` as build dependencies, and
@@ -983,6 +995,24 @@ same items it reports for Arch's `konsole`: the package's own versioned
 libraries (not yet installed when `namcap` runs) and `sh` for the
 `kmuxprofile` script. The installed `kmux --version` reports `0.1.0-alpha.1`
 without a commit, as expected for an archive build.
+
+The `kmux-workspaces-git` `PKGBUILD` shares the dependencies and CMake options
+of the release package and adds `git` to `makedepends`. It provides
+`kmux-workspaces` and conflicts with both `kmux-workspaces` and `kmux`. Its
+`pkgver()` does not use `git describe`: the repository carries the inherited
+Konsole tags, which would yield Konsole versions such as `24.01.90`. It
+combines the Kmux version from `CMakeLists.txt` with the total commit count and
+the short hash, for example `0.1.0alpha.1.r10591.g1cd2691`, which `vercmp`
+orders after `0.1.0alpha.1` and before `0.1.0alpha.2` and `0.1.0`.
+
+On 2026-09-29 it was built with `makepkg --syncdeps` in a fresh
+`archlinux:latest` container, cloning `master` at `1cd269166` from GitHub.
+`namcap` reported the same items as for the release package. The package
+installed 129 files, `kmux --version` reported `0.1.0-alpha.1 (1cd269166a67)`,
+`pacman -Qkk` found no altered files, and removal left nothing in `/usr/bin`.
+The AUR copy needs a `.SRCINFO` generated with `makepkg --printsrcinfo`; it is
+not kept in this repository.
+
 ## Flatpak/Flathub checklist
 
 These tasks are not required for the first alpha unless Flatpak is advertised

@@ -60,14 +60,16 @@ Kmux installs next to Konsole. [`BUILD.md`](BUILD.md) also covers build
 options, running the tests, and removing a manual installation.
 
 On Arch Linux, you can build a package instead, so that pacman tracks the
-installed files. An AUR package named `kmux-workspaces` is planned.
+installed files. Until the first release is tagged, use the development
+package, which builds the current `master` branch from GitHub:
 
 ```sh
-cd packaging/aur/kmux-workspaces
+cd packaging/aur/kmux-workspaces-git
 makepkg -si
 ```
 
-The `PKGBUILD` builds the release tag it names, not your checkout.
+Neither `PKGBUILD` builds your checkout. `packaging/aur/kmux-workspaces` builds
+the release tag it names. AUR packages under both names are planned.
 
 ## Getting Started
 
