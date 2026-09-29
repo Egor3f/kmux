@@ -1850,6 +1850,19 @@ enum class SavedShellIdentity {
     Omit,
 };
 
+// Temporary profiles from -p, -e, --tabs-from-file, or kmuxprofile have no
+// file, so restoring could not find them after a restart. Save the stored
+// profile they are based on; their other changes are deliberately lost.
+Profile::Ptr restorableProfile(const Profile::Ptr &profile)
+{
+    for (Profile::Ptr candidate = profile; candidate; candidate = candidate->parent()) {
+        if (!candidate->path().isEmpty()) {
+            return candidate;
+        }
+    }
+    return profile;
+}
+
 // A finished command stays visible when its tab is held open, but
 // restoring it would run the command again.
 bool shouldSaveTerminal(TerminalDisplay *terminalDisplay)
@@ -1875,8 +1888,9 @@ QJsonObject saveSessionTerminal(TerminalDisplay *terminalDisplay, SavedShellIden
     thisTerminal.insert(QStringLiteral("Columns"), terminalDisplay->columns());
     thisTerminal.insert(QStringLiteral("Lines"), terminalDisplay->lines());
     thisTerminal.insert(QStringLiteral("WorkingDirectory"), terminalDisplay->session()->currentWorkingDirectory());
-    thisTerminal.insert(QStringLiteral("ProfilePath"), profile ? profile->path() : QString());
-    thisTerminal.insert(QStringLiteral("ProfileName"), profile ? profile->name() : QString());
+    const Profile::Ptr savedProfile = restorableProfile(profile);
+    thisTerminal.insert(QStringLiteral("ProfilePath"), savedProfile ? savedProfile->path() : QString());
+    thisTerminal.insert(QStringLiteral("ProfileName"), savedProfile ? savedProfile->name() : QString());
     thisTerminal.insert(QStringLiteral("Command"), terminalSession->program());
     thisTerminal.insert(QStringLiteral("Arguments"), QJsonArray::fromStringList(terminalSession->arguments()));
     thisTerminal.insert(QStringLiteral("Environment"), QJsonArray::fromStringList(profile ? profile->environment() : QStringList()));

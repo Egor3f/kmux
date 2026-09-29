@@ -2609,6 +2609,52 @@ void ViewManagerTest::testColdRestoreAppliesLaunchSettingsToSharedProfile()
     }
 }
 
+void ViewManagerTest::testColdRestoreUsesStoredProfileOfTemporaryProfile()
+{
+    KConfig config(m_testDir->filePath(QStringLiteral("temporary-profile-state-testrc")), KConfig::SimpleConfig);
+    KConfigGroup group(&config, QStringLiteral("Window"));
+
+    const QString profileName = QStringLiteral("Temporary profile base");
+    const QString profilePath = m_testDir->filePath(QStringLiteral("temporary-profile-base.profile"));
+
+    {
+        auto sourceWindow = MainWindow();
+        Profile::Ptr storedProfile(new Profile(ProfileManager::instance()->defaultProfile()));
+        storedProfile->setHidden(true);
+        storedProfile->setProperty(Profile::Name, profileName);
+        storedProfile->setProperty(Profile::Path, profilePath);
+        storedProfile->setProperty(Profile::TerminalMargin, 7);
+
+        Session *session = sourceWindow.createSession(storedProfile, m_testDir->path());
+        QVERIFY(session != nullptr);
+        // Like kmuxprofile, this gives the session a temporary child profile.
+        Q_EMIT session->profileChangeCommandReceived(QStringLiteral("TerminalMargin=3"));
+        const Profile::Ptr temporaryProfile = SessionManager::instance()->sessionProfile(session);
+        QVERIFY(temporaryProfile != storedProfile);
+        QVERIFY(temporaryProfile->path().isEmpty());
+        QCOMPARE(temporaryProfile->terminalMargin(), 3);
+
+        sourceWindow.viewManager()->saveSessions(group);
+    }
+
+    const auto projects = QJsonDocument::fromJson(group.readEntry("Projects", QByteArray("[]"))).array();
+    const auto terminal = projects.at(0).toObject()[QStringLiteral("Tabs")].toArray().at(0).toObject()[QStringLiteral("Widgets")].toArray().at(0).toObject();
+    QCOMPARE(terminal[QStringLiteral("ProfilePath")].toString(), profilePath);
+    QCOMPARE(terminal[QStringLiteral("ProfileName")].toString(), profileName);
+
+    auto restoredWindow = MainWindow();
+    auto *restoredManager = restoredWindow.viewManager();
+    restoredManager->restoreSessions(group, false);
+
+    Session *restoredSession = restoredManager->activeViewController()->session();
+    QVERIFY(restoredSession != nullptr);
+    const Profile::Ptr restoredProfile = SessionManager::instance()->sessionProfile(restoredSession);
+    QCOMPARE(restoredProfile->name(), profileName);
+    QCOMPARE(restoredProfile->path(), profilePath);
+    // The temporary change itself is not restored.
+    QCOMPARE(restoredProfile->terminalMargin(), 7);
+}
+
 void ViewManagerTest::testColdRestorePreservesSplitSizesAndFocusedTerminal()
 {
     KConfig config(m_testDir->filePath(QStringLiteral("split-state-testrc")), KConfig::SimpleConfig);
@@ -2676,6 +2722,7 @@ void ViewManagerTest::testColdRestoreIgnoresEmptyEncoding()
         Profile::Ptr profile(new Profile(ProfileManager::instance()->defaultProfile()));
         profile->setHidden(true);
         profile->setProperty(Profile::Name, QStringLiteral("Empty encoding restore test profile"));
+        profile->setProperty(Profile::Path, m_testDir->filePath(QStringLiteral("empty-encoding.profile")));
         profile->setProperty(Profile::DefaultEncoding, QString::fromLatin1(profileEncoding));
 
         Session *session = sourceWindow.createSession(profile, m_testDir->path());

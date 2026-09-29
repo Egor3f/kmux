@@ -77,6 +77,7 @@ private Q_SLOTS:
     void testRestoredProjectTitlesDoNotDuplicateDefaultTitle();
     void testColdRestorePreservesSessionProfileAndState();
     void testColdRestoreAppliesLaunchSettingsToSharedProfile();
+    void testColdRestoreUsesStoredProfileOfTemporaryProfile();
     void testColdRestorePreservesSplitSizesAndFocusedTerminal();
     void testColdRestoreIgnoresEmptyEncoding();
     void testColdRestorePreservesShellSessionId();

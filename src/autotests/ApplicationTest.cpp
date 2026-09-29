@@ -10,8 +10,10 @@
 #include "../ApplicationMetadata.h"
 #include "../MainWindow.h"
 #include "../ViewManager.h"
+#include "../profile/Profile.h"
 #include "../session/Session.h"
 #include "../session/SessionController.h"
+#include "../session/SessionManager.h"
 #include "../terminalDisplay/TerminalDisplay.h"
 #include "../widgets/ProjectWorkspaceContainer.h"
 #include "../widgets/ViewContainer.h"
@@ -29,6 +31,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <KConfig>
 #include <KConfigGroup>
 #include <KSharedConfig>
 
@@ -374,6 +377,79 @@ void ApplicationTest::testProfilePropertyCreatesTabOnActivation()
     QCOMPARE(activeSession(window)->color(), QColor(QStringLiteral("#ff663399")));
 
     delete window;
+}
+
+void ApplicationTest::testRestoreReplacesTemporaryProfileWithBase_data()
+{
+    QTest::addColumn<QStringList>("arguments");
+    QTest::addColumn<QString>("tabs");
+    QTest::addColumn<int>("temporaryMargin");
+    QTest::addColumn<QString>("tabTitle");
+
+    // {profile} stands for the path of the stored base profile.
+    QTest::newRow("profile property") << QStringList{QStringLiteral("--profile"),
+                                                     QStringLiteral("{profile}"),
+                                                     QStringLiteral("-p"),
+                                                     QStringLiteral("TerminalMargin=3")}
+                                      << QString() << 3 << QString();
+    QTest::newRow("tabs file") << QStringList{QStringLiteral("--tabs-from-file"), QStringLiteral("tabs.conf")}
+                               << QStringLiteral("profile: {profile};; title: Temporary tab\n") << 7 << QStringLiteral("Temporary tab");
+}
+
+void ApplicationTest::testRestoreReplacesTemporaryProfileWithBase()
+{
+    QFETCH(QStringList, arguments);
+    QFETCH(QString, tabs);
+    QFETCH(int, temporaryMargin);
+    QFETCH(QString, tabTitle);
+
+    QTemporaryDir callingDirectory;
+    QVERIFY(callingDirectory.isValid());
+    const QString profilePath = callingDirectory.filePath(QStringLiteral("temporary-base.profile"));
+    QFile profileFile(profilePath);
+    QVERIFY(profileFile.open(QIODevice::WriteOnly | QIODevice::Text));
+    const QByteArray profile("[General]\nName=Temporary profile base\nTerminalMargin=7\n");
+    QCOMPARE(profileFile.write(profile), profile.size());
+    profileFile.close();
+
+    if (!tabs.isEmpty()) {
+        QFile tabsFile(callingDirectory.filePath(QStringLiteral("tabs.conf")));
+        QVERIFY(tabsFile.open(QIODevice::WriteOnly | QIODevice::Text));
+        const QByteArray tabsContent = tabs.replace(QStringLiteral("{profile}"), profilePath).toUtf8();
+        QCOMPARE(tabsFile.write(tabsContent), tabsContent.size());
+    }
+    arguments.replaceInStrings(QStringLiteral("{profile}"), profilePath);
+
+    auto parser = QSharedPointer<QCommandLineParser>::create();
+    Application::populateCommandLineParser(parser.get());
+    parser->parse({QStringLiteral("kmux")});
+    Application application(parser, {});
+    application.slotActivateRequested(arguments, callingDirectory.path());
+
+    auto *window = mainWindow();
+    QVERIFY(window != nullptr);
+    Session *session = activeSession(window);
+    QVERIFY(session != nullptr);
+    const Profile::Ptr temporaryProfile = SessionManager::instance()->sessionProfile(session);
+    QVERIFY(temporaryProfile->path().isEmpty());
+    QCOMPARE(temporaryProfile->terminalMargin(), temporaryMargin);
+
+    KConfig config(callingDirectory.filePath(QStringLiteral("workspace-state")), KConfig::SimpleConfig);
+    KConfigGroup group(&config, QStringLiteral("Window"));
+    window->viewManager()->saveSessions(group);
+    delete window;
+
+    auto restoredWindow = MainWindow();
+    restoredWindow.viewManager()->restoreSessions(group, false);
+    Session *restoredSession = activeSession(&restoredWindow);
+    QVERIFY(restoredSession != nullptr);
+    const Profile::Ptr restoredProfile = SessionManager::instance()->sessionProfile(restoredSession);
+    QCOMPARE(restoredProfile->path(), profilePath);
+    QCOMPARE(restoredProfile->terminalMargin(), 7);
+    // Saved terminal state, such as the tab title, still comes back.
+    if (!tabTitle.isEmpty()) {
+        QCOMPARE(restoredSession->tabTitleFormat(Session::LocalTabTitle), tabTitle);
+    }
 }
 
 QTEST_MAIN(ApplicationTest)

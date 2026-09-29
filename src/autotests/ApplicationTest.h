@@ -30,6 +30,8 @@ private Q_SLOTS:
     void testExplicitSessionRequestPreservesInitialWorkspace_data();
     void testExplicitSessionRequestPreservesInitialWorkspace();
     void testProfilePropertyCreatesTabOnActivation();
+    void testRestoreReplacesTemporaryProfileWithBase_data();
+    void testRestoreReplacesTemporaryProfileWithBase();
 };
 }
 
