@@ -3577,6 +3577,10 @@ void ViewManager::addMoveTabToProjectMenu(QMenu *menu, TabbedViewContainer *sour
     projectMenu->menuAction()->setObjectName(QStringLiteral("move-tab-to-project"));
     projectMenu->setEnabled(tabIndex >= 0 && tabIndex < sourceContainer->count() && _workspaceContainer->projectCount() > 1);
 
+    // The menu runs its own event loop, so either project can close and the
+    // tab can change position before an entry is chosen.
+    const QPointer<TabbedViewContainer> source(sourceContainer);
+    const QPointer<ViewSplitter> movedSplitter(sourceContainer->viewSplitterAt(tabIndex));
     const auto containers = _workspaceContainer->containers();
     for (TabbedViewContainer *targetContainer : containers) {
         if (targetContainer == nullptr || targetContainer == sourceContainer) {
@@ -3584,10 +3588,14 @@ void ViewManager::addMoveTabToProjectMenu(QMenu *menu, TabbedViewContainer *sour
         }
 
         const QString title = _workspaceContainer->projectTitle(targetContainer);
-        auto *action = projectMenu->addAction(title.isEmpty() ? i18nc("@title", "Project") : title, this, [this, sourceContainer, targetContainer, tabIndex] {
-            moveTabToProject(sourceContainer, tabIndex, targetContainer);
+        const QPointer<TabbedViewContainer> target(targetContainer);
+        auto *action = projectMenu->addAction(title.isEmpty() ? i18nc("@title", "Project") : title, this, [this, source, movedSplitter, target] {
+            if (source.isNull() || movedSplitter.isNull() || target.isNull()) {
+                return;
+            }
+            moveTabToProject(source, source->indexOf(movedSplitter), target);
         });
-        action->setEnabled(tabIndex >= 0 && tabIndex < sourceContainer->count());
+        action->setEnabled(!movedSplitter.isNull());
     }
 }
 
@@ -3595,6 +3603,15 @@ void ViewManager::moveTabToProject(TabbedViewContainer *sourceContainer, int tab
 {
     if (sourceContainer == nullptr || targetContainer == nullptr || sourceContainer == targetContainer || tabIndex < 0
         || tabIndex >= sourceContainer->count()) {
+        return;
+    }
+
+    if (_workspaceContainer.isNull()) {
+        return;
+    }
+    // A closed project stays alive until its deferred deletion.
+    const auto containers = _workspaceContainer->containers();
+    if (!containers.contains(sourceContainer) || !containers.contains(targetContainer)) {
         return;
     }
 

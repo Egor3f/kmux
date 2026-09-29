@@ -2008,6 +2008,53 @@ void ViewManagerTest::testMoveTabBetweenProjectWorkspaces()
     QVERIFY(movedSplitter->terminalMaximized());
 }
 
+void ViewManagerTest::testMoveTabMenuSurvivesChangesWhileOpen()
+{
+    auto mw = MainWindow();
+    auto *viewManager = mw.viewManager();
+    auto *workspaces = viewManager->_workspaceContainer.data();
+    QVERIFY(workspaces != nullptr);
+
+    mw.newTab();
+    auto *sourceProject = viewManager->activeContainer();
+    mw.newTab();
+    mw.newTab();
+    QCOMPARE(sourceProject->count(), 3);
+    auto *firstSplitter = sourceProject->viewSplitterAt(0);
+    auto *movedSplitter = sourceProject->viewSplitterAt(2);
+
+    viewManager->createProject();
+    QPointer<TabbedViewContainer> closedProject(viewManager->activeContainer());
+    viewManager->createProject();
+    auto *targetProject = viewManager->activeContainer();
+    workspaces->activateProject(sourceProject);
+
+    QMenu menu;
+    viewManager->addMoveTabToProjectMenu(&menu, sourceProject, 2);
+    QMenu *projectMenu = nullptr;
+    for (QAction *action : menu.actions()) {
+        if (action->objectName() == QLatin1String("move-tab-to-project")) {
+            projectMenu = action->menu();
+        }
+    }
+    QVERIFY(projectMenu != nullptr);
+    const QList<QAction *> moveActions = projectMenu->actions();
+    QCOMPARE(moveActions.count(), 2);
+
+    // The menu runs its own event loop, so terminals can exit while it is open.
+    viewManager->sessionControllersForContainer(closedProject).first()->session()->close();
+    QTRY_VERIFY(closedProject.isNull());
+    moveActions.at(0)->trigger();
+    QCOMPARE(sourceProject->count(), 3);
+
+    firstSplitter->activeTerminalDisplay()->session()->close();
+    QTRY_COMPARE(sourceProject->count(), 2);
+    moveActions.at(1)->trigger();
+    QCOMPARE(sourceProject->count(), 1);
+    QCOMPARE(targetProject->count(), 2);
+    QCOMPARE(targetProject->currentWidget(), movedSplitter);
+}
+
 void ViewManagerTest::testSaveSessionsStoresProjectWorkspaces()
 {
     auto mw = MainWindow();

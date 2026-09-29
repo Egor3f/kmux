@@ -64,6 +64,7 @@ private Q_SLOTS:
     void testProjectWorkspaceNewWindowActionDisabled();
     void testUnsupportedHelpActionsHidden();
     void testMoveTabBetweenProjectWorkspaces();
+    void testMoveTabMenuSurvivesChangesWhileOpen();
     void testSaveSessionsStoresProjectWorkspaces();
     void testProjectWorkspaceRailWidthPersists();
     void testProjectIconsPersistWithoutLoadingInactiveProjects();
