@@ -2788,6 +2788,52 @@ void ViewManagerTest::testFinishedHeldCommandIsNotColdRestored()
     QCOMPARE(counter.readAll(), QByteArray("run\n"));
 }
 
+void ViewManagerTest::testFinishedHeldTabDoesNotShiftActiveTab()
+{
+    KConfig config(m_testDir->filePath(QStringLiteral("held-tab-active-state-testrc")), KConfig::SimpleConfig);
+    KConfigGroup group(&config, QStringLiteral("Window"));
+
+    const QString activeTitle = QStringLiteral("active after held tab");
+
+    {
+        auto sourceWindow = MainWindow();
+
+        Profile::Ptr profile(new Profile(ProfileManager::instance()->defaultProfile()));
+        profile->setHidden(true);
+        profile->setProperty(Profile::Command, QStringLiteral("/bin/true"));
+        profile->setProperty(Profile::Arguments, QStringList{QStringLiteral("/bin/true")});
+
+        Session *heldSession = sourceWindow.createSession(profile, m_testDir->path());
+        QVERIFY(heldSession != nullptr);
+        heldSession->setAutoClose(false);
+        heldSession->run();
+        QTRY_VERIFY(heldSession->hasProcessExited());
+
+        sourceWindow.newTab();
+        sourceWindow.newTab();
+        auto *project = sourceWindow.viewManager()->activeContainer();
+        QCOMPARE(project->count(), 3);
+        project->viewSplitterAt(1)->activeTerminalDisplay()->session()->setTabTitleFormat(Session::LocalTabTitle, activeTitle);
+        project->setCurrentIndex(1);
+
+        sourceWindow.viewManager()->saveSessions(group);
+    }
+
+    QCOMPARE(group.readEntry("Active", -1), 0);
+    const auto projects = QJsonDocument::fromJson(group.readEntry("Projects", QByteArray("[]"))).array();
+    QCOMPARE(projects.count(), 1);
+    QCOMPARE(projects.at(0).toObject()[QStringLiteral("Tabs")].toArray().count(), 2);
+    QCOMPARE(projects.at(0).toObject()[QStringLiteral("Active")].toInt(-1), 0);
+
+    auto restoredWindow = MainWindow();
+    auto *restoredManager = restoredWindow.viewManager();
+    restoredManager->restoreSessions(group, false);
+
+    Session *restoredSession = restoredManager->activeViewController()->session();
+    QVERIFY(restoredSession != nullptr);
+    QCOMPARE(restoredSession->tabTitleFormat(Session::LocalTabTitle), activeTitle);
+}
+
 void ViewManagerTest::testColdRestoreRecoversIncompleteTerminalState()
 {
     KConfig config(m_testDir->filePath(QStringLiteral("incomplete-state-testrc")), KConfig::SimpleConfig);

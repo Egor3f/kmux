@@ -1850,16 +1850,22 @@ enum class SavedShellIdentity {
     Omit,
 };
 
+// A finished command stays visible when its tab is held open, but
+// restoring it would run the command again.
+bool shouldSaveTerminal(TerminalDisplay *terminalDisplay)
+{
+    auto terminalSession = terminalDisplay->sessionController()->session();
+    return terminalSession != nullptr && !terminalSession->hasProcessExited();
+}
+
 QJsonObject saveSessionTerminal(TerminalDisplay *terminalDisplay, SavedShellIdentity shellIdentity)
 {
     QJsonObject thisTerminal;
-    auto terminalSession = terminalDisplay->sessionController()->session();
-    // A finished command stays visible when its tab is held open, but
-    // restoring it would run the command again.
-    if (terminalSession == nullptr || terminalSession->hasProcessExited()) {
+    if (!shouldSaveTerminal(terminalDisplay)) {
         return thisTerminal;
     }
 
+    auto terminalSession = terminalDisplay->sessionController()->session();
     const Profile::Ptr profile = SessionManager::instance()->sessionProfile(terminalSession);
     const int sessionRestoreId = SessionManager::instance()->getRestoreId(terminalSession);
     thisTerminal.insert(QStringLiteral("SessionRestoreId"), sessionRestoreId);
@@ -1940,6 +1946,29 @@ QJsonArray saveContainerSessions(TabbedViewContainer *container)
     }
 
     return rootArray;
+}
+
+// saveContainerSessions() leaves out tabs without a terminal to save, so the
+// active tab maps to the last saved tab at or before it, as restoring does.
+int savedActiveTab(TabbedViewContainer *container)
+{
+    int activeTab = 0;
+    int savedTabs = 0;
+    for (int i = 0; container != nullptr && i < container->count(); i++) {
+        auto *splitter = container->viewSplitterAt(i);
+        if (splitter == nullptr) {
+            continue;
+        }
+        const auto terminals = splitter->findChildren<TerminalDisplay *>();
+        if (std::none_of(terminals.cbegin(), terminals.cend(), shouldSaveTerminal)) {
+            continue;
+        }
+        if (i <= container->currentIndex()) {
+            activeTab = savedTabs;
+        }
+        ++savedTabs;
+    }
+    return activeTab;
 }
 
 QString activeContainerWorkingDirectory(TabbedViewContainer *container)
@@ -2422,7 +2451,7 @@ QJsonArray ViewManager::projectTabsForSaving(TabbedViewContainer *container) con
 int ViewManager::projectActiveTabForSaving(TabbedViewContainer *container) const
 {
     const auto deferred = _deferredProjects.constFind(container);
-    return deferred != _deferredProjects.cend() ? deferred->activeTab : (container != nullptr ? container->currentIndex() : 0);
+    return deferred != _deferredProjects.cend() ? deferred->activeTab : savedActiveTab(container);
 }
 
 void ViewManager::loadLayout(QString file)

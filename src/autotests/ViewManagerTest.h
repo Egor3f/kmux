@@ -82,6 +82,7 @@ private Q_SLOTS:
     void testColdRestoreDoesNotReuseLiveShellSessionId();
     void testFinishedAutoCloseCommandIsNotColdRestored();
     void testFinishedHeldCommandIsNotColdRestored();
+    void testFinishedHeldTabDoesNotShiftActiveTab();
     void testColdRestoreRecoversIncompleteTerminalState();
     void testCloseConfirmationSavesWorkspaceFirst();
     void testInitializeRestoredSessionsPreservesActiveTabs();
