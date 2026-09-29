@@ -1901,27 +1901,31 @@ QJsonObject saveSessionTerminal(TerminalDisplay *terminalDisplay, SavedShellIden
     return thisTerminal;
 }
 
-QJsonObject saveSessionsRecurse(QSplitter *splitter, SavedShellIdentity shellIdentity)
+QJsonObject saveSessionsRecurse(QSplitter *splitter, SavedShellIdentity shellIdentity, const TerminalDisplay *focusedTerminal = nullptr)
 {
     QJsonObject thisSplitter;
     thisSplitter.insert(QStringLiteral("Orientation"), splitter->orientation() == Qt::Horizontal ? QStringLiteral("Horizontal") : QStringLiteral("Vertical"));
 
+    const QList<int> sizes = splitter->sizes();
     QJsonArray internalWidgets;
+    QJsonArray internalWidgetSizes;
     for (int i = 0; i < splitter->count(); i++) {
         auto *widget = splitter->widget(i);
         auto *maybeSplitter = qobject_cast<QSplitter *>(widget);
         auto *maybeTerminalDisplay = ViewSplitter::terminalDisplayForWidget(widget);
 
+        QJsonObject savedWidget;
         if (maybeSplitter != nullptr) {
-            const QJsonObject savedSplitter = saveSessionsRecurse(maybeSplitter, shellIdentity);
-            if (!savedSplitter.isEmpty()) {
-                internalWidgets.append(savedSplitter);
-            }
+            savedWidget = saveSessionsRecurse(maybeSplitter, shellIdentity, focusedTerminal);
         } else if (maybeTerminalDisplay != nullptr) {
-            const QJsonObject savedTerminal = saveSessionTerminal(maybeTerminalDisplay, shellIdentity);
-            if (!savedTerminal.isEmpty()) {
-                internalWidgets.append(savedTerminal);
+            savedWidget = saveSessionTerminal(maybeTerminalDisplay, shellIdentity);
+            if (!savedWidget.isEmpty() && maybeTerminalDisplay == focusedTerminal) {
+                savedWidget.insert(QStringLiteral("Focused"), true);
             }
+        }
+        if (!savedWidget.isEmpty()) {
+            internalWidgets.append(savedWidget);
+            internalWidgetSizes.append(sizes.value(i));
         }
     }
     if (internalWidgets.isEmpty()) {
@@ -1929,6 +1933,7 @@ QJsonObject saveSessionsRecurse(QSplitter *splitter, SavedShellIdentity shellIde
     }
 
     thisSplitter.insert(QStringLiteral("Widgets"), internalWidgets);
+    thisSplitter.insert(QStringLiteral("Sizes"), internalWidgetSizes);
     return thisSplitter;
 }
 
@@ -1936,9 +1941,9 @@ QJsonArray saveContainerSessions(TabbedViewContainer *container)
 {
     QJsonArray rootArray;
     for (int i = 0; container != nullptr && i < container->count(); i++) {
-        auto *splitter = qobject_cast<QSplitter *>(container->widget(i));
+        auto *splitter = container->viewSplitterAt(i);
         if (splitter != nullptr) {
-            const QJsonObject savedSplitter = saveSessionsRecurse(splitter, SavedShellIdentity::Include);
+            const QJsonObject savedSplitter = saveSessionsRecurse(splitter, SavedShellIdentity::Include, splitter->activeTerminalDisplay());
             if (!savedSplitter.isEmpty()) {
                 rootArray.append(savedSplitter);
             }
@@ -2221,16 +2226,19 @@ ViewSplitter *restoreSessionsSplitterRecurse(const QJsonObject &jsonSplitter,
                                              ViewManager *manager,
                                              TabbedViewContainer *container,
                                              bool useSessionId,
-                                             const QHash<int, QPointer<Session>> *restoredSessions = nullptr)
+                                             const QHash<int, QPointer<Session>> *restoredSessions = nullptr,
+                                             TerminalDisplay **focusedTerminal = nullptr)
 {
     const QJsonArray splitterWidgets = jsonSplitter[QStringLiteral("Widgets")].toArray();
+    const QJsonArray savedSizes = jsonSplitter[QStringLiteral("Sizes")].toArray();
     auto orientation = (jsonSplitter[QStringLiteral("Orientation")].toString() == QStringLiteral("Horizontal")) ? Qt::Horizontal : Qt::Vertical;
 
     auto *currentSplitter = new ViewSplitter();
     currentSplitter->setOrientation(orientation);
 
-    for (const auto widgetJsonValue : splitterWidgets) {
-        const auto widgetJsonObject = widgetJsonValue.toObject();
+    QList<int> restoredSizes;
+    for (qsizetype widgetIndex = 0; widgetIndex < splitterWidgets.size(); ++widgetIndex) {
+        const auto widgetJsonObject = splitterWidgets.at(widgetIndex).toObject();
         const auto sessionIterator = widgetJsonObject.constFind(QStringLiteral("SessionRestoreId"));
         const auto columnsIterator = widgetJsonObject.constFind(QStringLiteral("Columns"));
         const auto linesIterator = widgetJsonObject.constFind(QStringLiteral("Lines"));
@@ -2285,14 +2293,29 @@ ViewSplitter *restoreSessionsSplitterRecurse(const QJsonObject &jsonSplitter,
                 }
             }
 
-        } else if (auto *nextSplitter = restoreSessionsSplitterRecurse(widgetJsonObject, manager, container, useSessionId, restoredSessions)) {
+            if (focusedTerminal != nullptr && widgetJsonObject[QStringLiteral("Focused")].toBool()) {
+                *focusedTerminal = newView;
+            }
+            restoredSizes.append(savedSizes.at(widgetIndex).toInt());
+        } else if (auto *nextSplitter = restoreSessionsSplitterRecurse(widgetJsonObject, manager, container, useSessionId, restoredSessions, focusedTerminal)) {
             currentSplitter->addWidget(nextSplitter);
+            restoredSizes.append(savedSizes.at(widgetIndex).toInt());
         }
     }
 
     if (currentSplitter->count() == 0) {
         delete currentSplitter;
         return nullptr;
+    }
+
+    // The splitter only keeps the proportions until it gets its real size.
+    // Panes hidden by a maximized terminal were saved with no size, so keep
+    // the even split for them rather than restoring them collapsed.
+    const bool hasSavedSizes = restoredSizes.size() == currentSplitter->count() && std::all_of(restoredSizes.cbegin(), restoredSizes.cend(), [](int size) {
+                                   return size > 0;
+                               });
+    if (hasSavedSizes) {
+        currentSplitter->setSizes(restoredSizes);
     }
     return currentSplitter;
 }
@@ -2312,7 +2335,9 @@ void restoreTabsIntoContainer(ViewManager *manager,
     // restored tab at or before it.
     int restoredActiveTab = 0;
     for (qsizetype savedTab = 0; savedTab < jsonTabs.size(); ++savedTab) {
-        auto *topLevelSplitter = restoreSessionsSplitterRecurse(jsonTabs.at(savedTab).toObject(), manager, container, useSessionIds, restoredSessions);
+        TerminalDisplay *focusedTerminal = nullptr;
+        auto *topLevelSplitter =
+            restoreSessionsSplitterRecurse(jsonTabs.at(savedTab).toObject(), manager, container, useSessionIds, restoredSessions, &focusedTerminal);
         if (topLevelSplitter == nullptr) {
             continue;
         }
@@ -2320,6 +2345,10 @@ void restoreTabsIntoContainer(ViewManager *manager,
             restoredActiveTab = container->count();
         }
         container->addSplitter(topLevelSplitter, container->count());
+        // A splitter's active terminal is the one that last had focus in it.
+        if (focusedTerminal != nullptr) {
+            focusedTerminal->setFocus(Qt::OtherFocusReason);
+        }
     }
 
     if (container->count() == 0) {

@@ -2609,6 +2609,62 @@ void ViewManagerTest::testColdRestoreAppliesLaunchSettingsToSharedProfile()
     }
 }
 
+void ViewManagerTest::testColdRestorePreservesSplitSizesAndFocusedTerminal()
+{
+    KConfig config(m_testDir->filePath(QStringLiteral("split-state-testrc")), KConfig::SimpleConfig);
+    KConfigGroup group(&config, QStringLiteral("Window"));
+
+    const QSize windowSize(1200, 800);
+    double savedFirstPaneShare = 0;
+
+    {
+        auto sourceWindow = MainWindow();
+        sourceWindow.resize(windowSize);
+        auto *manager = sourceWindow.viewManager();
+        manager->newSession(manager->defaultProfile(), m_testDir->path());
+        manager->splitLeftRight();
+        sourceWindow.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&sourceWindow));
+
+        auto *splitter = manager->activeContainer()->activeViewSplitter();
+        QCOMPARE(splitter->count(), 2);
+        const int totalSize = splitter->sizes().at(0) + splitter->sizes().at(1);
+        splitter->setSizes({totalSize / 4, totalSize - totalSize / 4});
+        const QList<int> sizes = splitter->sizes();
+        savedFirstPaneShare = double(sizes.at(0)) / (sizes.at(0) + sizes.at(1));
+
+        auto *secondPane = ViewSplitter::terminalDisplayForWidget(splitter->widget(1));
+        QVERIFY(secondPane != nullptr);
+        secondPane->setFocus(Qt::OtherFocusReason);
+        QCOMPARE(splitter->activeTerminalDisplay(), secondPane);
+
+        manager->saveSessions(group);
+    }
+
+    const auto projects = QJsonDocument::fromJson(group.readEntry("Projects", QByteArray("[]"))).array();
+    const auto savedSplitter = projects.at(0).toObject()[QStringLiteral("Tabs")].toArray().at(0).toObject();
+    const auto savedTerminals = savedSplitter[QStringLiteral("Widgets")].toArray();
+    QCOMPARE(savedSplitter[QStringLiteral("Sizes")].toArray().count(), 2);
+    QVERIFY(!savedTerminals.at(0).toObject().contains(QStringLiteral("Focused")));
+    QVERIFY(savedTerminals.at(1).toObject()[QStringLiteral("Focused")].toBool());
+
+    auto restoredWindow = MainWindow();
+    restoredWindow.resize(windowSize);
+    auto *restoredManager = restoredWindow.viewManager();
+    restoredManager->restoreSessions(group, false);
+    restoredWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&restoredWindow));
+    restoredManager->initializeRestoredSessions();
+
+    auto *restoredSplitter = restoredManager->activeContainer()->activeViewSplitter();
+    QCOMPARE(restoredSplitter->count(), 2);
+    const QList<int> restoredSizes = restoredSplitter->sizes();
+    const double restoredFirstPaneShare = double(restoredSizes.at(0)) / (restoredSizes.at(0) + restoredSizes.at(1));
+    QVERIFY2(qAbs(restoredFirstPaneShare - savedFirstPaneShare) < 0.02,
+             qPrintable(QStringLiteral("saved share %1, restored share %2").arg(savedFirstPaneShare).arg(restoredFirstPaneShare)));
+    QCOMPARE(restoredSplitter->activeTerminalDisplay(), ViewSplitter::terminalDisplayForWidget(restoredSplitter->widget(1)));
+}
+
 void ViewManagerTest::testColdRestoreIgnoresEmptyEncoding()
 {
     KConfig config(m_testDir->filePath(QStringLiteral("cold-restore-empty-encoding-testrc")), KConfig::SimpleConfig);
