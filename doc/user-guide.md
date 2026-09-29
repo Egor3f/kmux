@@ -13,6 +13,15 @@ Every project gets back its tabs, split layouts, and active tab, and every
 terminal its working directory, profile, tab title and colors, encoding, and
 badge.
 
+Temporary profile changes are not saved. A terminal started with
+`-p property=value`, opened from a `--tabs-from-file` entry, or changed with
+`kmuxprofile` comes back with the profile those changes were applied to: the
+one named with `--profile` or in the tabs file, otherwise the default profile.
+The terminal state listed above, such as the tab title and colors, is kept,
+but other changed properties return to the profile's values. For example,
+after `kmux -p TerminalMargin=3` the restored terminal uses the profile's
+margin again.
+
 Restoration recreates terminals; it does not checkpoint running processes.
 Every restored terminal starts a new process:
 
