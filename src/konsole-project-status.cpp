@@ -31,6 +31,8 @@
 
 namespace
 {
+constexpr qint64 ClaudeTranscriptTailBytes = 1024 * 1024;
+
 QString stripTomlComment(const QString &line)
 {
     QChar quote;
@@ -240,6 +242,53 @@ bool hasClaudeBackgroundWork(const QJsonObject &payload)
             type.compare(QLatin1String("subagent"), Qt::CaseInsensitive) == 0 || type.compare(QLatin1String("workflow"), Qt::CaseInsensitive) == 0;
         return isRunning && isAgentWork;
     });
+}
+
+bool hasClaudeUsageLimitWrapUp(const QJsonObject &payload)
+{
+    if (!payload.value(QStringLiteral("agent_id")).toString().trimmed().isEmpty()) {
+        return false;
+    }
+    QFile transcript(payload.value(QStringLiteral("transcript_path")).toString());
+    if (!QFileInfo(transcript).isFile() || !transcript.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    const qint64 offset = std::max<qint64>(0, transcript.size() - ClaudeTranscriptTailBytes);
+    if (!transcript.seek(offset)) {
+        return false;
+    }
+    const QList<QByteArray> lines = transcript.read(ClaudeTranscriptTailBytes).split('\n');
+    const QString promptId = payload.value(QStringLiteral("prompt_id")).toString();
+    const QString sessionId = payload.value(QStringLiteral("session_id")).toString();
+    // Graceful usage-limit shutdowns finish with Stop, not StopFailure. Claude
+    // records the reason as metadata on a user message before its final reply.
+    for (auto line = lines.crbegin(); line != lines.crend(); ++line) {
+        const QJsonObject record = QJsonDocument::fromJson(*line).object();
+        if (record.value(QStringLiteral("type")) != QLatin1String("user") || record.value(QStringLiteral("isSidechain")).toBool()) {
+            continue;
+        }
+        const QString recordPromptId = record.value(QStringLiteral("promptId")).toString();
+        const QString recordSessionId = record.value(QStringLiteral("sessionId")).toString();
+        if ((!promptId.isEmpty() && !recordPromptId.isEmpty() && recordPromptId != promptId)
+            || (!sessionId.isEmpty() && !recordSessionId.isEmpty() && recordSessionId != sessionId)) {
+            return false;
+        }
+        const bool isMeta = record.value(QStringLiteral("isMeta")).toBool();
+        const bool isTurnCompanion = record.value(QStringLiteral("turnCompanion")).toBool();
+        const QString usageLimitNote = record.value(QStringLiteral("usageLimitNote")).toString();
+        if (isMeta && isTurnCompanion && !usageLimitNote.isEmpty()) {
+            return usageLimitNote == QLatin1String("wrap_up");
+        }
+        const QJsonValue content = record.value(QStringLiteral("message")).toObject().value(QStringLiteral("content"));
+        const QJsonArray blocks = content.toArray();
+        const bool hasText = content.isString() || std::any_of(blocks.cbegin(), blocks.cend(), [](const QJsonValue &block) {
+                                 return block.toObject().value(QStringLiteral("type")) == QLatin1String("text");
+                             });
+        if (!isMeta && !isTurnCompanion && hasText) {
+            return false;
+        }
+    }
+    return false;
 }
 
 QString codexConfigHome()
@@ -474,6 +523,11 @@ int main(int argc, char **argv)
     }
     if (parser.isSet(claudeStopFailureOption)
         && payload.value(QStringLiteral("error")).toString().compare(QLatin1String("rate_limit"), Qt::CaseInsensitive) == 0) {
+        event = QStringLiteral("RateLimit");
+        status = QStringLiteral("rateLimited");
+    }
+    if ((parser.isSet(claudeStopOption) || (parser.isSet(claudeNotificationOption) && event == QLatin1String("IdlePrompt")))
+        && hasClaudeUsageLimitWrapUp(payload)) {
         event = QStringLiteral("RateLimit");
         status = QStringLiteral("rateLimited");
     }

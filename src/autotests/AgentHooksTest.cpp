@@ -40,6 +40,8 @@ private Q_SLOTS:
     void testClaudeCommandUsesTransparentLauncher();
     void testCodexPermissionRequestUsesConfiguredReviewer();
     void testClaudeLifecycleConfiguration();
+    void testClaudeUsageLimitWrapUp_data();
+    void testClaudeUsageLimitWrapUp();
     void testHookOperationsWaitForTransactionLock_data();
     void testHookOperationsWaitForTransactionLock();
     void testUnrelatedHooksArePreserved_data();
@@ -914,6 +916,138 @@ void AgentHooksTest::testClaudeLifecycleConfiguration()
             QStringLiteral("idle"),
             QStringLiteral("StopFailure"));
     runHook(sessionEndCommand, QJsonObject{{QStringLiteral("reason"), QStringLiteral("exit")}}, QStringLiteral("none"), QStringLiteral("SessionEnd"));
+}
+
+void AgentHooksTest::testClaudeUsageLimitWrapUp_data()
+{
+    QTest::addColumn<QJsonArray>("transcriptRows");
+    QTest::addColumn<QJsonObject>("payloadFields");
+    QTest::addColumn<QString>("event");
+    QTest::addColumn<QString>("expectedStatus");
+
+    const QJsonObject prompt{
+        {QStringLiteral("type"), QStringLiteral("user")},
+        {QStringLiteral("promptId"), QStringLiteral("current-prompt")},
+        {QStringLiteral("message"), QJsonObject{{QStringLiteral("content"), QStringLiteral("Continue working")}}},
+    };
+    const QJsonObject wrapUp{
+        {QStringLiteral("type"), QStringLiteral("user")},
+        {QStringLiteral("promptId"), QStringLiteral("current-prompt")},
+        {QStringLiteral("isMeta"), true},
+        {QStringLiteral("turnCompanion"), true},
+        {QStringLiteral("usageLimitNote"), QStringLiteral("wrap_up")},
+    };
+    const QJsonObject assistant{{QStringLiteral("type"), QStringLiteral("assistant")}};
+    const QJsonObject payload{{QStringLiteral("prompt_id"), QStringLiteral("current-prompt")}};
+    const QString stop = QStringLiteral("Stop");
+    const QString rateLimited = QStringLiteral("rateLimited");
+    const QString idle = QStringLiteral("idle");
+
+    QTest::newRow("graceful-stop") << QJsonArray{prompt, wrapUp, assistant} << payload << stop << rateLimited;
+    QTest::newRow("idle-reminder") << QJsonArray{prompt, wrapUp, assistant} << payload << QStringLiteral("Notification") << rateLimited;
+    QTest::newRow("ordinary-idle-reminder") << QJsonArray{prompt, assistant} << payload << QStringLiteral("Notification") << idle;
+    QTest::newRow("permission-notification") << QJsonArray{prompt, wrapUp, assistant}
+                                             << QJsonObject{{QStringLiteral("prompt_id"), QStringLiteral("current-prompt")},
+                                                            {QStringLiteral("notification_type"), QStringLiteral("permission_prompt")}}
+                                             << QStringLiteral("Notification") << QStringLiteral("needsInput");
+    QTest::newRow("background-agents") << QJsonArray{prompt, wrapUp, assistant}
+                                       << QJsonObject{{QStringLiteral("prompt_id"), QStringLiteral("current-prompt")},
+                                                      {QStringLiteral("background_tasks"),
+                                                       QJsonArray{QJsonObject{{QStringLiteral("type"), QStringLiteral("subagent")},
+                                                                              {QStringLiteral("status"), QStringLiteral("running")}}}}}
+                                       << stop << rateLimited;
+    QTest::newRow("ordinary-stop") << QJsonArray{prompt, assistant} << payload << stop << idle;
+    QTest::newRow("missing-transcript") << QJsonArray{} << payload << stop << idle;
+    QTest::newRow("old-prompt") << QJsonArray{wrapUp, assistant} << QJsonObject{{QStringLiteral("prompt_id"), QStringLiteral("next-prompt")}} << stop << idle;
+    QTest::newRow("new-prompt-without-hook-id") << QJsonArray{wrapUp, prompt, assistant} << QJsonObject{} << stop << idle;
+    QTest::newRow("wrap-up-without-hook-id") << QJsonArray{prompt, wrapUp, assistant} << QJsonObject{} << stop << rateLimited;
+
+    QJsonObject note = wrapUp;
+    note.insert(QStringLiteral("usageLimitNote"), QStringLiteral("release"));
+    QTest::newRow("limit-released") << QJsonArray{prompt, wrapUp, note, assistant} << payload << stop << idle;
+    note.insert(QStringLiteral("usageLimitNote"), QStringLiteral("near_limit"));
+    QTest::newRow("near-limit") << QJsonArray{prompt, note, assistant} << payload << stop << idle;
+    note = wrapUp;
+    note.insert(QStringLiteral("isSidechain"), true);
+    QTest::newRow("sidechain-note") << QJsonArray{prompt, note, assistant} << payload << stop << idle;
+    note = wrapUp;
+    note.insert(QStringLiteral("isMeta"), false);
+    QTest::newRow("user-text-is-not-a-limit-signal") << QJsonArray{prompt, note, assistant} << payload << stop << idle;
+    note = wrapUp;
+    note.insert(QStringLiteral("sessionId"), QStringLiteral("other-session"));
+    QTest::newRow("other-session") << QJsonArray{prompt, note, assistant}
+                                   << QJsonObject{{QStringLiteral("prompt_id"), QStringLiteral("current-prompt")},
+                                                  {QStringLiteral("session_id"), QStringLiteral("current-session")}}
+                                   << stop << idle;
+    QTest::newRow("resumed-work") << QJsonArray{prompt, wrapUp, assistant} << payload << QStringLiteral("PreToolUse") << QStringLiteral("running");
+    QTest::newRow("subagent-stop") << QJsonArray{prompt, wrapUp, assistant}
+                                   << QJsonObject{{QStringLiteral("prompt_id"), QStringLiteral("current-prompt")},
+                                                  {QStringLiteral("agent_id"), QStringLiteral("subagent")}}
+                                   << stop << idle;
+}
+
+void AgentHooksTest::testClaudeUsageLimitWrapUp()
+{
+    QFETCH(QJsonArray, transcriptRows);
+    QFETCH(QJsonObject, payloadFields);
+    QFETCH(QString, event);
+    QFETCH(QString, expectedStatus);
+
+    QTemporaryDir temporaryDir;
+    QVERIFY(temporaryDir.isValid());
+    const QString transcriptPath = temporaryDir.filePath(QStringLiteral("transcript.jsonl"));
+    if (!transcriptRows.isEmpty()) {
+        QFile transcript(transcriptPath);
+        QVERIFY(transcript.open(QIODevice::WriteOnly));
+        // Real transcripts grow to tens of megabytes; only their tail is relevant.
+        const QByteArray prefix =
+            QJsonDocument(QJsonObject{{QStringLiteral("padding"), QString(1024 * 1024, QLatin1Char('x'))}}).toJson(QJsonDocument::Compact);
+        QCOMPARE(transcript.write(prefix + '\n'), prefix.size() + 1);
+        for (const QJsonValue &row : transcriptRows) {
+            const QByteArray line = QJsonDocument(row.toObject()).toJson(QJsonDocument::Compact) + '\n';
+            QCOMPARE(transcript.write(line), line.size());
+        }
+    }
+    payloadFields.insert(QStringLiteral("transcript_path"), transcriptPath);
+    const QString tracePath = temporaryDir.filePath(QStringLiteral("trace.jsonl"));
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("KMUX_AGENT_HOOK_LOG"), tracePath);
+    environment.remove(QStringLiteral("KMUX_DBUS_SERVICE"));
+    environment.remove(QStringLiteral("KMUX_DBUS_SESSION"));
+
+    QStringList arguments{QStringLiteral("--hook-output"), QStringLiteral("--agent"), QStringLiteral("claude"), QStringLiteral("--event"), event};
+    if (event == QLatin1String("Stop")) {
+        arguments << QStringLiteral("--claude-stop");
+    } else if (event == QLatin1String("Notification")) {
+        arguments << QStringLiteral("--claude-notification");
+        if (!payloadFields.contains(QStringLiteral("notification_type"))) {
+            payloadFields.insert(QStringLiteral("notification_type"), QStringLiteral("idle_prompt"));
+        }
+    }
+    arguments << (event == QLatin1String("PreToolUse")         ? QStringLiteral("running")
+                      : event == QLatin1String("Notification") ? QStringLiteral("needsInput")
+                                                               : QStringLiteral("idle"));
+    const QByteArray payload = QJsonDocument(payloadFields).toJson(QJsonDocument::Compact);
+
+    QProcess process;
+    process.setProcessEnvironment(environment);
+    process.start(QStringLiteral(KMUX_PROJECT_STATUS_EXECUTABLE), arguments);
+    QVERIFY(process.waitForStarted());
+    QCOMPARE(process.write(payload), payload.size());
+    process.closeWriteChannel();
+    QVERIFY(process.waitForFinished());
+    QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+    QCOMPARE(process.exitCode(), 0);
+
+    QFile trace(tracePath);
+    QVERIFY(trace.open(QIODevice::ReadOnly));
+    const QJsonObject record = QJsonDocument::fromJson(trace.readLine()).object();
+    QCOMPARE(record.value(QStringLiteral("phase")).toString(), QStringLiteral("received"));
+    QCOMPARE(record.value(QStringLiteral("status")).toString(), expectedStatus);
+    if (event == QLatin1String("Notification") && payloadFields.value(QStringLiteral("notification_type")) == QLatin1String("idle_prompt")) {
+        event = QStringLiteral("IdlePrompt");
+    }
+    QCOMPARE(record.value(QStringLiteral("event")).toString(), expectedStatus == QLatin1String("rateLimited") ? QStringLiteral("RateLimit") : event);
 }
 
 void AgentHooksTest::testCodexFeatureToml_data()
