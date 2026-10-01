@@ -276,7 +276,7 @@ public:
         const int statusIndicatorWidth = rateLimited ? 13 : indicatorWidth(indicatorMetrics, statusBadge);
         const int visibleIndicatorCount = (!tabsBadge.isEmpty() ? 1 : 0) + (!processBadge.isEmpty() ? 1 : 0) + (statusIndicatorWidth > 0 ? 1 : 0);
         const int indicatorGap = qMax(0, visibleIndicatorCount - 1) * 10;
-        const int activityWidth = processBadge.isEmpty() && hasActivity ? 8 : 0;
+        const int activityWidth = processBadge.isEmpty() && hasActivity && statusIndicatorWidth == 0 ? 8 : 0;
         const int indicatorsWidth = tabsIndicatorWidth + processIndicatorWidth + statusIndicatorWidth + indicatorGap + activityWidth;
         QRect indicatorsRect;
         if (indicatorsWidth > 0) {
