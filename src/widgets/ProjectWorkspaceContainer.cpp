@@ -57,7 +57,6 @@ enum ProjectRoles {
     SubtitleRole,
     TabCountRole,
     ActiveProcessCountRole,
-    HasActivityRole,
     LoadedRole,
     ProjectStatusRole,
     ProjectIconNameRole,
@@ -248,7 +247,6 @@ public:
 
         const int tabCount = index.data(TabCountRole).toInt();
         const int processCount = index.data(ActiveProcessCountRole).toInt();
-        const bool hasActivity = index.data(HasActivityRole).toBool();
         const bool loaded = index.data(LoadedRole).toBool();
         const auto projectStatus = static_cast<ProjectWorkspaceContainer::ProjectStatus>(index.data(ProjectStatusRole).toInt());
 
@@ -276,8 +274,7 @@ public:
         const int statusIndicatorWidth = rateLimited ? 13 : indicatorWidth(indicatorMetrics, statusBadge);
         const int visibleIndicatorCount = (!tabsBadge.isEmpty() ? 1 : 0) + (!processBadge.isEmpty() ? 1 : 0) + (statusIndicatorWidth > 0 ? 1 : 0);
         const int indicatorGap = qMax(0, visibleIndicatorCount - 1) * 10;
-        const int activityWidth = processBadge.isEmpty() && hasActivity && statusIndicatorWidth == 0 ? 8 : 0;
-        const int indicatorsWidth = tabsIndicatorWidth + processIndicatorWidth + statusIndicatorWidth + indicatorGap + activityWidth;
+        const int indicatorsWidth = tabsIndicatorWidth + processIndicatorWidth + statusIndicatorWidth + indicatorGap;
         QRect indicatorsRect;
         if (indicatorsWidth > 0) {
             indicatorsRect = QRect(rect.right() - indicatorsWidth, rect.top() + 1, indicatorsWidth, 18);
@@ -296,7 +293,6 @@ public:
         QRect tabsIndicatorRect;
         QRect processIndicatorRect;
         QRect statusIndicatorRect;
-        QRect activityRect;
         int indicatorLeft = indicatorsRect.left();
         if (!tabsBadge.isEmpty()) {
             tabsIndicatorRect = QRect(indicatorLeft, indicatorsRect.top(), tabsIndicatorWidth, indicatorsRect.height());
@@ -308,8 +304,6 @@ public:
         }
         if (statusIndicatorWidth > 0) {
             statusIndicatorRect = QRect(indicatorLeft, indicatorsRect.top(), statusIndicatorWidth, indicatorsRect.height());
-        } else if (hasActivity && processBadge.isEmpty()) {
-            activityRect = QRect(indicatorLeft, indicatorsRect.center().y() - 3, 7, 7);
         }
 
         if (!loaded) {
@@ -363,10 +357,6 @@ public:
             } else {
                 drawInlineIndicator(painter, statusIndicatorRect, statusBadge, statusColor, indicatorFont, drawProcessIndicatorIcon);
             }
-        } else if (!activityRect.isNull()) {
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(highlightColor);
-            painter->drawEllipse(activityRect);
         }
 
         painter->restore();
@@ -899,7 +889,6 @@ void ProjectWorkspaceContainer::updateListItem(int index)
     item->setData(SubtitleRole, project.subtitle);
     item->setData(TabCountRole, project.tabCount);
     item->setData(ActiveProcessCountRole, project.activeProcessCount);
-    item->setData(HasActivityRole, project.hasActivity);
     item->setData(LoadedRole, project.loaded);
     item->setData(ProjectStatusRole, static_cast<int>(project.status));
     QString tooltip = project.subtitle.isEmpty() ? project.title : QStringLiteral("%1\n%2").arg(project.title, project.subtitle);
