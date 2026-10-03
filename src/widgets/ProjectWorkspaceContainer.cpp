@@ -22,7 +22,6 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QPainter>
-#include <QPointer>
 #include <QRegion>
 #include <QSignalBlocker>
 #include <QSplitter>
@@ -190,14 +189,7 @@ void drawInlineIndicator(QPainter *painter,
 class ProjectItemDelegate : public QStyledItemDelegate
 {
 public:
-    // The rail style sheet replaces the list's background roles with transparent
-    // and black brushes, so the rail color is read from railPaletteSource, which
-    // the style sheet does not restyle.
-    ProjectItemDelegate(const QWidget *railPaletteSource, QObject *parent)
-        : QStyledItemDelegate(parent)
-        , _railPaletteSource(railPaletteSource)
-    {
-    }
+    using QStyledItemDelegate::QStyledItemDelegate;
 
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
@@ -223,7 +215,6 @@ public:
         const QRect rect = itemOption.rect.adjusted(8, 7, -12, -7);
         const QColor highlightColor = itemOption.palette.color(QPalette::Highlight);
         if (selected) {
-            const QPalette &railPalette = _railPaletteSource != nullptr ? _railPaletteSource->palette() : itemOption.palette;
             QRect backgroundRect = itemOption.rect;
             if (itemOption.widget != nullptr) {
                 backgroundRect.setLeft(itemOption.widget->rect().left());
@@ -232,7 +223,7 @@ public:
             painter->setPen(Qt::NoPen);
             // Tinting toward the text color darkens a light rail and lightens a dark one,
             // so the selection stands out under either kind of color scheme.
-            painter->setBrush(blendedColor(railPalette.color(QPalette::Window), railPalette.color(QPalette::WindowText), SelectedProjectTintOpacity));
+            painter->setBrush(blendedColor(itemOption.palette.color(QPalette::Window), itemOption.palette.color(QPalette::WindowText), SelectedProjectTintOpacity));
             painter->drawRect(backgroundRect);
 
             painter->setBrush(highlightColor);
@@ -371,9 +362,20 @@ public:
 
         painter->restore();
     }
+};
 
-private:
-    QPointer<const QWidget> _railPaletteSource;
+class ProjectRailWidget : public QWidget
+{
+public:
+    using QWidget::QWidget;
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        painter.fillRect(rect(), palette().color(QPalette::Window));
+        painter.fillRect(QRect(width() - 1, 0, 1, height()), palette().color(QPalette::Mid));
+    }
 };
 
 class ProjectListWidget : public QListWidget
@@ -401,7 +403,7 @@ protected:
 ProjectWorkspaceContainer::ProjectWorkspaceContainer(QWidget *parent)
     : QWidget(parent)
     , _model(new ProjectWorkspaceModel(this))
-    , _rail(new QWidget(this))
+    , _rail(new ProjectRailWidget(this))
     , _splitter(new QSplitter(Qt::Horizontal, this))
     , _projectList(new ProjectListWidget(this))
     , _stack(new QStackedWidget(this))
@@ -440,8 +442,9 @@ ProjectWorkspaceContainer::ProjectWorkspaceContainer(QWidget *parent)
     _projectList->setFocusPolicy(Qt::NoFocus);
     _projectList->setSelectionMode(QAbstractItemView::SingleSelection);
     _projectList->setContextMenuPolicy(Qt::CustomContextMenu);
-    _projectList->setItemDelegate(new ProjectItemDelegate(this, _projectList));
+    _projectList->setItemDelegate(new ProjectItemDelegate(_projectList));
     _projectList->setSpacing(0);
+    _projectList->viewport()->setAutoFillBackground(false);
     connect(_projectList, &QListWidget::currentRowChanged, this, &ProjectWorkspaceContainer::currentRowChanged);
     connect(_projectList, &QListWidget::itemDoubleClicked, this, &ProjectWorkspaceContainer::renameCurrentProject);
     connect(_projectList, &QListWidget::customContextMenuRequested, this, &ProjectWorkspaceContainer::openProjectContextMenu);
@@ -451,7 +454,7 @@ ProjectWorkspaceContainer::ProjectWorkspaceContainer(QWidget *parent)
     _projectList->viewport()->setAcceptDrops(true);
 
     auto *railLayout = new QVBoxLayout(_rail);
-    railLayout->setContentsMargins(0, 0, 0, 0);
+    railLayout->setContentsMargins(0, 0, 1, 0);
     railLayout->setSpacing(0);
     railLayout->addWidget(_projectList, 1);
 
@@ -469,8 +472,6 @@ ProjectWorkspaceContainer::ProjectWorkspaceContainer(QWidget *parent)
         _projectRailWidth = qBound(ProjectRailMinimumWidth, position, ProjectRailMaximumWidth);
     });
     rootLayout->addWidget(_splitter);
-
-    applyRailStyle();
 }
 
 ProjectWorkspaceContainer::~ProjectWorkspaceContainer()
@@ -915,28 +916,6 @@ void ProjectWorkspaceContainer::updateListItem(int index)
         item->setIcon(ProjectIcon::icon(project.iconName));
         item->setData(ProjectIconNameRole, project.iconName);
     }
-}
-
-void ProjectWorkspaceContainer::applyRailStyle()
-{
-    setStyleSheet(QStringLiteral(R"(
-        QWidget#projectRail {
-            background: palette(window);
-            border-right: 1px solid palette(mid);
-        }
-        QListWidget#projectList {
-            background: transparent;
-            outline: 0;
-        }
-        QListWidget#projectList::item {
-            padding: 0;
-            border-radius: 4px;
-        }
-        QListWidget#projectList::item:selected {
-            background: palette(highlight);
-            color: palette(highlighted-text);
-        }
-    )"));
 }
 
 void ProjectWorkspaceContainer::updateStatusAnimationTimer()

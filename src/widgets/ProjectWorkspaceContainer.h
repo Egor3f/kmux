@@ -91,7 +91,6 @@ private:
     ProjectWorkspaceModel::ProjectId projectId(TabbedViewContainer *container) const;
     TabbedViewContainer *containerAt(int index) const;
     void updateListItem(int index);
-    void applyRailStyle();
     void updateStatusAnimationTimer();
 
     ProjectWorkspaceModel *_model;

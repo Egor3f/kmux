@@ -1867,6 +1867,34 @@ void ViewManagerTest::testSelectedProjectFollowsRailBackground()
     QVERIFY2(qAbs(qGray(background.rgb()) - qGray(textColor.rgb())) >= 150, qPrintable(background.name()));
 }
 
+void ViewManagerTest::testProjectRailFollowsPaletteChange()
+{
+    const QPalette previousPalette = QApplication::palette();
+    const auto restorePalette = qScopeGuard([&] {
+        QApplication::setPalette(previousPalette);
+    });
+
+    const auto railColorFor = [](ProjectWorkspaceContainer &workspaces, const QColor &windowColor) {
+        QPalette palette = QApplication::palette();
+        palette.setColor(QPalette::Window, windowColor);
+        QApplication::setPalette(palette);
+        QCoreApplication::processEvents();
+        auto *rail = workspaces.findChild<QWidget *>(QStringLiteral("projectRail"));
+        const QImage image = rail->grab().toImage();
+        return image.pixelColor(image.width() / 2, image.height() - 2);
+    };
+
+    ProjectWorkspaceContainer workspaces;
+    workspaces.resize(600, 400);
+    QVERIFY(workspaces.findChild<QWidget *>(QStringLiteral("projectRail")) != nullptr);
+
+    const QColor light(239, 240, 241);
+    const QColor dark(32, 35, 38);
+    QCOMPARE(railColorFor(workspaces, light), light);
+    QCOMPARE(railColorFor(workspaces, dark), dark);
+    QCOMPARE(railColorFor(workspaces, light), light);
+}
+
 void ViewManagerTest::testNoNavigationDisablesProjectActions()
 {
     auto mw = MainWindow();

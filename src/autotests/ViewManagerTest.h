@@ -59,6 +59,7 @@ private Q_SLOTS:
     void testProjectWorkspaceRailDoesNotAcceptFocus();
     void testSelectedProjectFollowsRailBackground_data();
     void testSelectedProjectFollowsRailBackground();
+    void testProjectRailFollowsPaletteChange();
     void testNoNavigationDisablesProjectActions();
     void testProjectWorkspaceDetachActionsDisabled();
     void testProjectWorkspaceNewWindowActionDisabled();
