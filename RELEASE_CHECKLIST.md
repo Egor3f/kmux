@@ -966,7 +966,8 @@ an additional immutable desktop once Flatpak becomes an advertised channel.
 - [ ] Keep the AUR packaging history in an appropriate packaging repository.
 - [x] Draft the development package in `packaging/aur/kmux-workspaces-git/`.
 - [x] Build it from GitHub `master` in a fresh container and run `namcap`.
-- [ ] Submit `kmux-workspaces-git` to the AUR before the alpha tag.
+- [x] Submit `kmux-workspaces-git` to the AUR before the alpha tag. Published
+      on 2026-10-03 by the submitting AUR user (`egor3f`).
 
 The draft `PKGBUILD` follows Arch's `konsole` package: the same runtime
 dependencies, `extra-cmake-modules` and `ninja` as build dependencies, and

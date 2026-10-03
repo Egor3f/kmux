@@ -33,11 +33,12 @@ sudo pacman -S --needed git cmake ninja gcc pkgconf extra-cmake-modules \
 To run the tests, also install `dbus` and `which`; with `appstream`
 installed, CTest also validates the AppStream metadata.
 
-To install Kmux as a package instead, build it with `makepkg -si` from
-`packaging/aur/kmux-workspaces-git`, which clones the current `master` branch
-from GitHub, or from `packaging/aur/kmux-workspaces`, which downloads the
-source archive of the release tag it names. The release package works only
-once that tag is published.
+To install Kmux as a package instead, use the AUR package
+[`kmux-workspaces-git`](https://aur.archlinux.org/packages/kmux-workspaces-git),
+which builds the current `master` branch from GitHub. Its `PKGBUILD` is kept in
+`packaging/aur/kmux-workspaces-git`. The release package in
+`packaging/aur/kmux-workspaces` downloads the source archive of the release tag
+it names, so it works only once that tag is published.
 
 ### Other distributions
 

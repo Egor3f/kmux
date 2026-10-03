@@ -36,8 +36,10 @@ The first public alpha of Kmux, a KDE Konsole fork with
 ### Installation
 
 Kmux is distributed as source for this release; see [`BUILD.md`](BUILD.md).
-Arch Linux users can build a package from `packaging/aur/kmux-workspaces` with
-`makepkg -si`.
+Arch Linux users can install the development package
+[`kmux-workspaces-git`](https://aur.archlinux.org/packages/kmux-workspaces-git)
+from the AUR, or build a package of this release from
+`packaging/aur/kmux-workspaces` with `makepkg -si`.
 
 ### Known limitations
 
