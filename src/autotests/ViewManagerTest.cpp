@@ -92,6 +92,7 @@ public:
 
 void ViewManagerTest::initTestCase()
 {
+    QStandardPaths::setTestModeEnabled(true);
     m_testDir = new QTemporaryDir(QDir::tempPath() + QDir::separator() + QStringLiteral("konsoleviewmanagertest-XXXXXX"));
 }
 
