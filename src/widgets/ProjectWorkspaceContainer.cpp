@@ -205,12 +205,7 @@ public:
         itemOption.text.clear();
         itemOption.icon = {};
 
-        auto *style = itemOption.widget != nullptr ? itemOption.widget->style() : QApplication::style();
-        QStyleOptionViewItem backgroundOption(itemOption);
         const bool selected = itemOption.state.testFlag(QStyle::State_Selected);
-        backgroundOption.state.setFlag(QStyle::State_Selected, false);
-        style->drawPrimitive(QStyle::PE_PanelItemViewItem, &backgroundOption, painter, itemOption.widget);
-
         const QRect rect = itemOption.rect.adjusted(8, 7, -12, -7);
         const QColor highlightColor = itemOption.palette.color(QPalette::Highlight);
         if (selected) {
@@ -228,6 +223,13 @@ public:
             painter->setBrush(highlightColor);
             painter->drawRect(QRect(backgroundRect.left(), backgroundRect.top(), 3, backgroundRect.height()));
         }
+
+        // The style draws only the hover feedback here. It goes on top of the
+        // delegate's own selection background, so it shows on the selected project too.
+        auto *style = itemOption.widget != nullptr ? itemOption.widget->style() : QApplication::style();
+        QStyleOptionViewItem backgroundOption(itemOption);
+        backgroundOption.state.setFlag(QStyle::State_Selected, false);
+        style->drawPrimitive(QStyle::PE_PanelItemViewItem, &backgroundOption, painter, itemOption.widget);
 
         const QColor textColor = itemOption.palette.color(QPalette::Text);
         QColor subtleColor = itemOption.palette.color(QPalette::PlaceholderText);
