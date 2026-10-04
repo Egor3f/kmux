@@ -32,6 +32,7 @@ private Q_SLOTS:
     void testProfilePropertyCreatesTabOnActivation();
     void testRestoreReplacesTemporaryProfileWithBase_data();
     void testRestoreReplacesTemporaryProfileWithBase();
+    void testRestoreUsesThemeProfileAndKeepsTabState();
 };
 }
 

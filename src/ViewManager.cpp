@@ -7,6 +7,7 @@
 // Own
 #include "ViewManager.h"
 
+#include "KonsoleSettings.h"
 #include "config-konsole.h"
 #include "konsoledebug.h"
 #include "workspaces/AgentSleepInhibitor.h"
@@ -2267,7 +2268,9 @@ ViewSplitter *restoreSessionsSplitterRecurse(const QJsonObject &jsonSplitter,
             }
             const bool restoredExistingSession = session != nullptr;
             if (session == nullptr) {
-                session = manager->createSession(savedSessionProfile(widgetJsonObject));
+                const Profile::Ptr profile =
+                    KonsoleSettings::syncProfileWithSystemTheme() ? ProfileManager::instance()->defaultProfile() : savedSessionProfile(widgetJsonObject);
+                session = manager->createSession(profile);
             }
 
             if (!restoredExistingSession) {
