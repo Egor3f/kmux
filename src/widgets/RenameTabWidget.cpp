@@ -18,6 +18,15 @@
 
 using Konsole::RenameTabWidget;
 
+namespace
+{
+// The "None" combo entry is a transparent placeholder; callers expect an invalid color for it.
+QColor chosenColor(const QColor &comboColor)
+{
+    return comboColor.alpha() == 0 ? QColor() : comboColor;
+}
+}
+
 RenameTabWidget::RenameTabWidget(QWidget *parent)
     : QWidget(parent)
     , _ui(nullptr)
@@ -41,8 +50,12 @@ RenameTabWidget::RenameTabWidget(QWidget *parent)
 
     connect(_ui->tabTitleEdit, &QLineEdit::textChanged, this, &Konsole::RenameTabWidget::tabTitleFormatChanged);
     connect(_ui->remoteTabTitleEdit, &QLineEdit::textChanged, this, &Konsole::RenameTabWidget::remoteTabTitleFormatChanged);
-    connect(_ui->tabColorCombo, &KColorCombo::activated, this, &Konsole::RenameTabWidget::tabColorChanged);
-    connect(_ui->tabActivityColorCombo, &KColorCombo::activated, this, &Konsole::RenameTabWidget::tabActivityColorChanged);
+    connect(_ui->tabColorCombo, &KColorCombo::activated, this, [this](const QColor &color) {
+        Q_EMIT tabColorChanged(chosenColor(color));
+    });
+    connect(_ui->tabActivityColorCombo, &KColorCombo::activated, this, [this](const QColor &color) {
+        Q_EMIT tabActivityColorChanged(chosenColor(color));
+    });
 
     _ui->tabTitleFormatButton->setContext(Session::LocalTabTitle);
     connect(_ui->tabTitleFormatButton, &Konsole::TabTitleFormatButton::dynamicElementSelected, this, &Konsole::RenameTabWidget::insertTabTitleText);
@@ -106,12 +119,12 @@ QString RenameTabWidget::remoteTabTitleText() const
 
 QColor RenameTabWidget::color() const
 {
-    return _ui->tabColorCombo->color();
+    return chosenColor(_ui->tabColorCombo->color());
 }
 
 QColor RenameTabWidget::activityColor() const
 {
-    return _ui->tabActivityColorCombo->color();
+    return chosenColor(_ui->tabActivityColorCombo->color());
 }
 
 void RenameTabWidget::insertTabTitleText(const QString &text)
