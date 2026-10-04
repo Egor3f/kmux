@@ -11,6 +11,7 @@
 #include "../MainWindow.h"
 #include "../ViewManager.h"
 #include "../profile/Profile.h"
+#include "../profile/ProfileManager.h"
 #include "../session/Session.h"
 #include "../session/SessionController.h"
 #include "../session/SessionManager.h"
@@ -23,17 +24,23 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QFile>
+#include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QScopeGuard>
 #include <QSharedPointer>
 #include <QStandardPaths>
+#include <QStyleHints>
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <KActionCollection>
 #include <KConfig>
 #include <KConfigGroup>
 #include <KSharedConfig>
+
+#include "KonsoleSettings.h"
 
 using namespace Konsole;
 
@@ -450,6 +457,76 @@ void ApplicationTest::testRestoreReplacesTemporaryProfileWithBase()
     if (!tabTitle.isEmpty()) {
         QCOMPARE(restoredSession->tabTitleFormat(Session::LocalTabTitle), tabTitle);
     }
+}
+
+void ApplicationTest::testRestoreUsesThemeProfileAndKeepsTabState()
+{
+    QTemporaryDir profileDirectory;
+    QVERIFY(profileDirectory.isValid());
+    const QString profilePath = profileDirectory.filePath(QStringLiteral("other-theme.profile"));
+    QFile profileFile(profilePath);
+    QVERIFY(profileFile.open(QIODevice::WriteOnly | QIODevice::Text));
+    const QByteArray profileContent("[General]\nName=Other theme profile\n");
+    QCOMPARE(profileFile.write(profileContent), profileContent.size());
+    profileFile.close();
+
+    auto *profileManager = ProfileManager::instance();
+    const Profile::Ptr otherThemeProfile = profileManager->loadProfile(profilePath);
+    QVERIFY(otherThemeProfile);
+
+    const bool previousSync = KonsoleSettings::syncProfileWithSystemTheme();
+    const Profile::Ptr previousLight = profileManager->lightProfile();
+    const Profile::Ptr previousDark = profileManager->darkProfile();
+    const auto restoreSettings = qScopeGuard([&] {
+        KonsoleSettings::setSyncProfileWithSystemTheme(previousSync);
+        profileManager->setLightThemeProfile(previousLight);
+        profileManager->setDarkThemeProfile(previousDark);
+    });
+
+    // The current scheme picks the built-in profile; the tabs were saved
+    // under the other scheme.
+    const bool darkScheme = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
+    profileManager->setLightThemeProfile(darkScheme ? otherThemeProfile : profileManager->builtinProfile());
+    profileManager->setDarkThemeProfile(darkScheme ? profileManager->builtinProfile() : otherThemeProfile);
+    KonsoleSettings::setSyncProfileWithSystemTheme(true);
+
+    const QJsonObject terminal{
+        {QStringLiteral("ProfilePath"), profilePath},
+        {QStringLiteral("ProfileName"), otherThemeProfile->name()},
+        {QStringLiteral("Encoding"), QStringLiteral("ISO-8859-5")},
+        {QStringLiteral("BadgeEnabled"), true},
+        {QStringLiteral("BadgeText"), QStringLiteral("restored badge")},
+    };
+    const QJsonObject tab{{QStringLiteral("Orientation"), QStringLiteral("Horizontal")}, {QStringLiteral("Widgets"), QJsonArray{terminal}}};
+    QJsonArray projects;
+    for (const QString &title : {QStringLiteral("Active"), QStringLiteral("Lazy")}) {
+        projects.append(QJsonObject{{QStringLiteral("Title"), title}, {QStringLiteral("Tabs"), QJsonArray{tab}}, {QStringLiteral("Active"), 0}});
+    }
+    KConfigGroup group = savedWorkspaceGroup();
+    group.writeEntry("Projects", QJsonDocument(projects).toJson(QJsonDocument::Compact));
+    group.writeEntry("ActiveProject", 0);
+    group.sync();
+
+    auto window = MainWindow();
+    QVERIFY(window.restoreLastWorkspaceState());
+
+    const auto verifyActiveSession = [&window, profileManager] {
+        Session *session = activeSession(&window);
+        QVERIFY(session != nullptr);
+        QCOMPARE(SessionManager::instance()->sessionProfile(session), profileManager->builtinProfile());
+        QCOMPARE(session->codec(), QByteArrayLiteral("ISO-8859-5"));
+        QVERIFY(session->badgeEnabled());
+        QCOMPARE(session->badgeText(), QStringLiteral("restored badge"));
+    };
+    verifyActiveSession();
+    if (QTest::currentTestFailed()) {
+        return;
+    }
+
+    auto *activeProject = window.viewManager()->activeContainer();
+    window.actionCollection()->action(QStringLiteral("switch-to-workspace-1"))->trigger();
+    QVERIFY(window.viewManager()->activeContainer() != activeProject);
+    verifyActiveSession();
 }
 
 QTEST_MAIN(ApplicationTest)

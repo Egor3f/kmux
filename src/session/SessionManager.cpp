@@ -20,6 +20,7 @@
 #include "Emulation.h" // to connect the URL escape sequence extractor
 #include "Enumeration.h"
 #include "EscapeSequenceUrlExtractor.h"
+#include "KonsoleSettings.h"
 #include "Screen.h"
 #include "ShouldApplyProperty.h"
 #include "konsoledebug.h"
@@ -409,7 +410,7 @@ void SessionManager::restoreSessions(KConfig *config)
 
         const QString profile = sessionGroup.readPathEntry("Profile", QString());
         Profile::Ptr ptr = ProfileManager::instance()->defaultProfile();
-        if (!profile.isEmpty()) {
+        if (!profile.isEmpty() && !KonsoleSettings::syncProfileWithSystemTheme()) {
             ptr = ProfileManager::instance()->loadProfile(profile);
         }
         Session *session = createSession(ptr);

@@ -735,7 +735,6 @@ bool MainWindow::restoreLastWorkspaceState()
     }
 
     _viewManager->restoreSessions(group, false);
-    applyThemeProfile();
     return _viewManager->activeContainer() != nullptr && _viewManager->activeContainer()->count() > 0;
 }
 
@@ -965,7 +964,6 @@ void MainWindow::saveProperties(KConfigGroup &group)
 void MainWindow::readProperties(const KConfigGroup &group)
 {
     _viewManager->restoreSessions(group);
-    applyThemeProfile();
 }
 
 void MainWindow::saveGlobalProperties(KConfig *config)
